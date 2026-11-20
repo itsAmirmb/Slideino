@@ -1,0 +1,581 @@
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  CustomResource,
+  Deck,
+  LibraryDefinition,
+  LibraryId,
+  Slide,
+  SlideTemplate,
+  SlideTheme,
+  WorkspaceTab,
+} from './types/slideino';
+import { DEFAULT_LIBRARIES } from './data/libraries';
+import { SLIDE_TEMPLATES } from './data/starterDeck';
+import { exportStandaloneHtml } from './utils/htmlImporter';
+import {
+  getAllThemes,
+  loadActiveDeckId,
+  loadCustomThemes,
+  loadDecks,
+  loadUiDarkMode,
+  saveActiveDeckId,
+  saveCustomThemes,
+  saveDecks,
+  saveUiDarkMode,
+  triggerFileDownload,
+} from './utils/storage';
+import { Header } from './components/Header';
+import { StudioWorkspace } from './components/StudioWorkspace';
+import { ThemeStudio } from './components/ThemeStudio';
+import { LibraryManager } from './components/LibraryManager';
+import { DeckManager } from './components/DeckManager';
+import { ImportModal } from './components/ImportModal';
+import { PresentationMode } from './components/PresentationMode';
+
+export default function App() {
+  const [decks, setDecks] = useState<Deck[]>(() => loadDecks());
+  const [activeDeckId, setActiveDeckId] = useState<string>(() => loadActiveDeckId(loadDecks()));
+  const [customThemes, setCustomThemes] = useState<SlideTheme[]>(() => loadCustomThemes());
+  const [uiDarkMode, setUiDarkMode] = useState<boolean>(() => loadUiDarkMode());
+
+  const [activeTab, setActiveTab] = useState<WorkspaceTab>('studio');
+  const [activeSlideIndex, setActiveSlideIndex] = useState(0);
+  const [presenting, setPresenting] = useState(false);
+  const [importModalState, setImportModalState] = useState<{
+    open: boolean;
+    mode: 'import' | 'prompt';
+  }>({ open: false, mode: 'import' });
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const showToast = useCallback((msg: string) => {
+    setToastMessage(msg);
+  }, []);
+
+  useEffect(() => {
+    if (!toastMessage) return;
+    const id = window.setTimeout(() => setToastMessage(null), 2800);
+    return () => window.clearTimeout(id);
+  }, [toastMessage]);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', uiDarkMode);
+    saveUiDarkMode(uiDarkMode);
+  }, [uiDarkMode]);
+
+  useEffect(() => {
+    saveDecks(decks);
+  }, [decks]);
+
+  useEffect(() => {
+    saveActiveDeckId(activeDeckId);
+  }, [activeDeckId]);
+
+  useEffect(() => {
+    saveCustomThemes(customThemes);
+  }, [customThemes]);
+
+  const allThemes = useMemo(() => getAllThemes(customThemes), [customThemes]);
+
+  const activeDeck = useMemo(
+    () => decks.find((d) => d.id === activeDeckId) || decks[0],
+    [decks, activeDeckId]
+  );
+
+  const activeTheme = useMemo(
+    () => allThemes.find((t) => t.id === activeDeck.themeId) || allThemes[0],
+    [allThemes, activeDeck.themeId]
+  );
+
+  // Keep slide index within bounds when deck changes
+  useEffect(() => {
+    if (activeSlideIndex >= activeDeck.slides.length) {
+      setActiveSlideIndex(Math.max(0, activeDeck.slides.length - 1));
+    }
+  }, [activeDeck.slides.length, activeSlideIndex]);
+
+  // Global Cmd/Ctrl + Enter shortcut to present
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !presenting) {
+        e.preventDefault();
+        setPresenting(true);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [presenting]);
+
+  const updateActiveDeck = useCallback(
+    (updater: (deck: Deck) => Deck) => {
+      setDecks((prev) =>
+        prev.map((d) => (d.id === activeDeck.id ? updater(d) : d))
+      );
+    },
+    [activeDeck.id]
+  );
+
+  const handleUpdateSlide = useCallback(
+    (slideId: string, patch: Partial<Slide>) => {
+      updateActiveDeck((d) => ({
+        ...d,
+        updatedAt: new Date().toISOString(),
+        slides: d.slides.map((s) => (s.id === slideId ? { ...s, ...patch } : s)),
+      }));
+    },
+    [updateActiveDeck]
+  );
+
+  const handleAddSlide = useCallback(
+    (template?: SlideTemplate) => {
+      const tpl = template || SLIDE_TEMPLATES[0];
+      const newSlide: Slide = {
+        id: `slide-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        title: tpl.name,
+        html: tpl.html,
+        css: tpl.css,
+        notes: tpl.notes,
+        transition: activeDeck.defaultTransition,
+      };
+      const insertAt = activeSlideIndex + 1;
+      updateActiveDeck((d) => {
+        const nextSlides = [...d.slides];
+        nextSlides.splice(insertAt, 0, newSlide);
+        return {
+          ...d,
+          updatedAt: new Date().toISOString(),
+          slides: nextSlides,
+        };
+      });
+      setActiveSlideIndex(insertAt);
+      showToast(`Added "${tpl.name}" slide`);
+    },
+    [activeDeck.defaultTransition, activeSlideIndex, showToast, updateActiveDeck]
+  );
+
+  const handleDuplicateSlide = useCallback(
+    (slideId: string) => {
+      const idx = activeDeck.slides.findIndex((s) => s.id === slideId);
+      if (idx === -1) return;
+      const orig = activeDeck.slides[idx];
+      const copy: Slide = {
+        ...orig,
+        id: `slide-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        title: `${orig.title} (Copy)`,
+      };
+      updateActiveDeck((d) => {
+        const next = [...d.slides];
+        next.splice(idx + 1, 0, copy);
+        return { ...d, updatedAt: new Date().toISOString(), slides: next };
+      });
+      setActiveSlideIndex(idx + 1);
+      showToast('Slide duplicated');
+    },
+    [activeDeck.slides, showToast, updateActiveDeck]
+  );
+
+  const handleDeleteSlide = useCallback(
+    (slideId: string) => {
+      if (activeDeck.slides.length <= 1) return;
+      const idx = activeDeck.slides.findIndex((s) => s.id === slideId);
+      updateActiveDeck((d) => ({
+        ...d,
+        updatedAt: new Date().toISOString(),
+        slides: d.slides.filter((s) => s.id !== slideId),
+      }));
+      setActiveSlideIndex((prev) => Math.max(0, prev >= idx ? prev - 1 : prev));
+      showToast('Slide removed');
+    },
+    [activeDeck.slides, showToast, updateActiveDeck]
+  );
+
+  const handleMoveSlide = useCallback(
+    (index: number, direction: -1 | 1) => {
+      const target = index + direction;
+      if (target < 0 || target >= activeDeck.slides.length) return;
+      updateActiveDeck((d) => {
+        const next = [...d.slides];
+        const [moved] = next.splice(index, 1);
+        next.splice(target, 0, moved);
+        return { ...d, updatedAt: new Date().toISOString(), slides: next };
+      });
+      if (activeSlideIndex === index) setActiveSlideIndex(target);
+      else if (activeSlideIndex === target) setActiveSlideIndex(index);
+    },
+    [activeDeck.slides.length, activeSlideIndex, updateActiveDeck]
+  );
+
+  const handleImportSlides = useCallback(
+    (slides: Slide[], target: 'append' | 'new-deck', title?: string) => {
+      if (target === 'new-deck') {
+        const newDeck: Deck = {
+          id: `deck-${Date.now()}`,
+          title: title || 'Imported AI Presentation',
+          description: 'Imported from HTML/CSS.',
+          themeId: activeDeck.themeId,
+          aspectRatio: activeDeck.aspectRatio,
+          defaultTransition: 'fade',
+          libraries: { ...activeDeck.libraries },
+          customResources: [],
+          slides,
+          snapshots: [],
+          updatedAt: new Date().toISOString(),
+        };
+        setDecks((prev) => [newDeck, ...prev]);
+        setActiveDeckId(newDeck.id);
+        setActiveSlideIndex(0);
+        setActiveTab('studio');
+        showToast(`Created deck with ${slides.length} slides`);
+        return;
+      }
+
+      const startIndex = activeDeck.slides.length;
+      updateActiveDeck((d) => ({
+        ...d,
+        updatedAt: new Date().toISOString(),
+        slides: [...d.slides, ...slides],
+      }));
+      setActiveSlideIndex(startIndex);
+      setActiveTab('studio');
+      showToast(`Imported ${slides.length} ${slides.length === 1 ? 'slide' : 'slides'}`);
+    },
+    [activeDeck, showToast, updateActiveDeck]
+  );
+
+  const handleExportStandaloneHtml = useCallback(
+    (targetDeck: Deck = activeDeck) => {
+      const themeForDeck =
+        allThemes.find((t) => t.id === targetDeck.themeId) || allThemes[0];
+      const html = exportStandaloneHtml(
+        targetDeck,
+        themeForDeck,
+        window.location.origin
+      );
+      const slug = targetDeck.title.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+      triggerFileDownload(`${slug || 'slideino-deck'}.html`, html, 'text/html');
+      showToast('Exported standalone HTML presentation');
+    },
+    [activeDeck, allThemes, showToast]
+  );
+
+  const handleToggleLibrary = useCallback(
+    (id: LibraryId) => {
+      updateActiveDeck((d) => ({
+        ...d,
+        updatedAt: new Date().toISOString(),
+        libraries: { ...d.libraries, [id]: !d.libraries[id] },
+      }));
+    },
+    [updateActiveDeck]
+  );
+
+  const handleInsertLibraryExample = useCallback(
+    (lib: LibraryDefinition) => {
+      const demoSlide: Slide = {
+        id: `slide-demo-${lib.id}-${Date.now()}`,
+        title: lib.exampleTitle,
+        html: lib.exampleHtml,
+        css: lib.exampleCss,
+        notes: lib.exampleNotes,
+        transition: 'fade',
+      };
+      const newIndex = activeDeck.slides.length;
+      updateActiveDeck((d) => ({
+        ...d,
+        updatedAt: new Date().toISOString(),
+        libraries: { ...d.libraries, [lib.id]: true },
+        slides: [...d.slides, demoSlide],
+      }));
+      setActiveSlideIndex(newIndex);
+      setActiveTab('studio');
+      showToast(`Enabled ${lib.name} and added demo slide`);
+    },
+    [activeDeck.slides.length, showToast, updateActiveDeck]
+  );
+
+  const handleAddCustomResource = useCallback(
+    (res: CustomResource) => {
+      updateActiveDeck((d) => ({
+        ...d,
+        updatedAt: new Date().toISOString(),
+        customResources: [...d.customResources, res],
+      }));
+      showToast(`Attached ${res.label}`);
+    },
+    [showToast, updateActiveDeck]
+  );
+
+  const handleRemoveCustomResource = useCallback(
+    (id: string) => {
+      updateActiveDeck((d) => ({
+        ...d,
+        updatedAt: new Date().toISOString(),
+        customResources: d.customResources.filter((r) => r.id !== id),
+      }));
+    },
+    [updateActiveDeck]
+  );
+
+  const handleSaveCustomTheme = useCallback((theme: SlideTheme) => {
+    setCustomThemes((prev) => {
+      const exists = prev.some((t) => t.id === theme.id);
+      return exists ? prev.map((t) => (t.id === theme.id ? theme : t)) : [...prev, theme];
+    });
+  }, []);
+
+  const handleDeleteCustomTheme = useCallback(
+    (themeId: string) => {
+      setCustomThemes((prev) => prev.filter((t) => t.id !== themeId));
+      setDecks((prev) =>
+        prev.map((d) => (d.themeId === themeId ? { ...d, themeId: 'atelier-light' } : d))
+      );
+      showToast('Custom theme deleted');
+    },
+    [showToast]
+  );
+
+  const handleCreateDeck = useCallback(() => {
+    const blankTpl = SLIDE_TEMPLATES[1];
+    const newDeck: Deck = {
+      id: `deck-${Date.now()}`,
+      title: `Untitled Presentation ${decks.length + 1}`,
+      description: '',
+      themeId: activeDeck.themeId,
+      aspectRatio: '16:9',
+      defaultTransition: 'fade',
+      libraries: { ...DEFAULT_LIBRARIES },
+      customResources: [],
+      updatedAt: new Date().toISOString(),
+      snapshots: [],
+      slides: [
+        {
+          id: `slide-${Date.now()}`,
+          title: 'Opening Slide',
+          html: blankTpl.html,
+          css: blankTpl.css,
+          notes: blankTpl.notes,
+          transition: 'fade',
+        },
+      ],
+    };
+    setDecks((prev) => [newDeck, ...prev]);
+    setActiveDeckId(newDeck.id);
+    setActiveSlideIndex(0);
+    setActiveTab('studio');
+    showToast('Created new deck');
+  }, [activeDeck.themeId, decks.length, showToast]);
+
+  const handleDuplicateDeck = useCallback(
+    (deckId: string) => {
+      const source = decks.find((d) => d.id === deckId);
+      if (!source) return;
+      const copy: Deck = {
+        ...source,
+        id: `deck-${Date.now()}`,
+        title: `${source.title} (Copy)`,
+        updatedAt: new Date().toISOString(),
+        slides: source.slides.map((s, idx) => ({
+          ...s,
+          id: `slide-${Date.now()}-${idx}`,
+        })),
+      };
+      setDecks((prev) => [copy, ...prev]);
+      showToast('Deck duplicated');
+    },
+    [decks, showToast]
+  );
+
+  const handleDeleteDeck = useCallback(
+    (deckId: string) => {
+      if (decks.length <= 1) return;
+      const remaining = decks.filter((d) => d.id !== deckId);
+      setDecks(remaining);
+      if (activeDeckId === deckId) {
+        setActiveDeckId(remaining[0].id);
+        setActiveSlideIndex(0);
+      }
+      showToast('Deck deleted');
+    },
+    [activeDeckId, decks, showToast]
+  );
+
+  const handleImportDeckJson = useCallback(
+    (imported: Deck) => {
+      setDecks((prev) => [imported, ...prev]);
+      setActiveDeckId(imported.id);
+      setActiveSlideIndex(0);
+      setActiveTab('studio');
+      showToast(`Imported "${imported.title}"`);
+    },
+    [showToast]
+  );
+
+  const handleSaveSnapshot = useCallback(
+    (message: string) => {
+      updateActiveDeck((d) => ({
+        ...d,
+        snapshots: [
+          {
+            id: `snap-${Date.now()}`,
+            message,
+            createdAt: new Date().toISOString(),
+            slideCount: d.slides.length,
+            themeId: d.themeId,
+            libraries: { ...d.libraries },
+            slides: d.slides.map((s) => ({ ...s })),
+          },
+          ...d.snapshots,
+        ],
+      }));
+      showToast('Saved revision snapshot');
+    },
+    [showToast, updateActiveDeck]
+  );
+
+  const handleRestoreSnapshot = useCallback(
+    (snapshotId: string) => {
+      const snap = activeDeck.snapshots.find((s) => s.id === snapshotId);
+      if (!snap || snap.slides.length === 0) return;
+      updateActiveDeck((d) => ({
+        ...d,
+        themeId: snap.themeId,
+        libraries: { ...snap.libraries },
+        slides: snap.slides.map((s) => ({ ...s })),
+        updatedAt: new Date().toISOString(),
+      }));
+      setActiveSlideIndex(0);
+      setActiveTab('studio');
+      showToast(`Restored "${snap.message}"`);
+    },
+    [activeDeck.snapshots, showToast, updateActiveDeck]
+  );
+
+  const handleDeleteSnapshot = useCallback(
+    (snapshotId: string) => {
+      updateActiveDeck((d) => ({
+        ...d,
+        snapshots: d.snapshots.filter((s) => s.id !== snapshotId),
+      }));
+    },
+    [updateActiveDeck]
+  );
+
+  return (
+    <div className="h-screen w-screen overflow-hidden flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
+      {/* Skip to Main Content Link for Keyboard & Screen Reader Accessibility */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:px-4 focus:py-2 focus:rounded-lg focus:bg-blue-600 focus:text-white focus:text-sm focus:font-medium"
+      >
+        Skip to workspace content
+      </a>
+
+      <Header
+        activeTab={activeTab}
+        onSelectTab={setActiveTab}
+        onStartPresentation={() => setPresenting(true)}
+      />
+
+      <main id="main-content" className="flex-1 min-h-0 flex flex-col overflow-hidden">
+        {activeTab === 'studio' && (
+          <StudioWorkspace
+            deck={activeDeck}
+            themes={allThemes}
+            activeTheme={activeTheme}
+            activeSlideIndex={activeSlideIndex}
+            uiDarkMode={uiDarkMode}
+            onToggleUiDarkMode={() => setUiDarkMode((v) => !v)}
+            onSelectSlide={setActiveSlideIndex}
+            onUpdateDeck={updateActiveDeck}
+            onUpdateSlide={handleUpdateSlide}
+            onAddSlide={handleAddSlide}
+            onDuplicateSlide={handleDuplicateSlide}
+            onDeleteSlide={handleDeleteSlide}
+            onMoveSlide={handleMoveSlide}
+            onOpenImportModal={(mode) => setImportModalState({ open: true, mode })}
+            onExportStandaloneHtml={() => handleExportStandaloneHtml(activeDeck)}
+          />
+        )}
+
+        {activeTab === 'themes' && (
+          <ThemeStudio
+            deck={activeDeck}
+            themes={allThemes}
+            activeSlideIndex={activeSlideIndex}
+            onSelectDeckTheme={(themeId) =>
+              updateActiveDeck((d) => ({
+                ...d,
+                themeId,
+                updatedAt: new Date().toISOString(),
+              }))
+            }
+            onSaveCustomTheme={handleSaveCustomTheme}
+            onDeleteCustomTheme={handleDeleteCustomTheme}
+          />
+        )}
+
+        {activeTab === 'libraries' && (
+          <LibraryManager
+            deck={activeDeck}
+            onToggleLibrary={handleToggleLibrary}
+            onInsertLibraryExample={handleInsertLibraryExample}
+            onAddCustomResource={handleAddCustomResource}
+            onRemoveCustomResource={handleRemoveCustomResource}
+          />
+        )}
+
+        {activeTab === 'decks' && (
+          <DeckManager
+            decks={decks}
+            activeDeck={activeDeck}
+            themes={allThemes}
+            onSelectDeck={(id) => {
+              setActiveDeckId(id);
+              setActiveSlideIndex(0);
+              setActiveTab('studio');
+            }}
+            onCreateDeck={handleCreateDeck}
+            onDuplicateDeck={handleDuplicateDeck}
+            onDeleteDeck={handleDeleteDeck}
+            onImportDeckJson={handleImportDeckJson}
+            onExportStandaloneHtml={handleExportStandaloneHtml}
+            onSaveSnapshot={handleSaveSnapshot}
+            onRestoreSnapshot={handleRestoreSnapshot}
+            onDeleteSnapshot={handleDeleteSnapshot}
+          />
+        )}
+      </main>
+
+      <ImportModal
+        isOpen={importModalState.open}
+        initialMode={importModalState.mode}
+        deck={activeDeck}
+        theme={activeTheme}
+        onClose={() => setImportModalState((s) => ({ ...s, open: false }))}
+        onImportSlides={handleImportSlides}
+      />
+
+      {presenting && (
+        <PresentationMode
+          deck={activeDeck}
+          theme={activeTheme}
+          initialSlideIndex={activeSlideIndex}
+          onExit={(lastIndex) => {
+            setPresenting(false);
+            setActiveSlideIndex(lastIndex);
+          }}
+        />
+      )}
+
+      {/* Accessible Toast Notification */}
+      {toastMessage && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed bottom-5 right-5 z-50 px-4 py-2.5 rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-950 text-xs font-medium shadow-lg border border-slate-800 dark:border-slate-200"
+        >
+          {toastMessage}
+        </div>
+      )}
+    </div>
+  );
+}

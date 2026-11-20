@@ -1,0 +1,6 @@
+{
+  "name": "Slideino",
+  "description": "Responsive, accessible HTML and CSS slide studio and presentation player built for AI-generated slides, supporting Tailwind CSS, Mermaid, KaTeX, Chart.js, Highlight.js, custom themes, and standalone export.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
