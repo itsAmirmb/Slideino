@@ -11,7 +11,7 @@ import {
 } from './types/slideino';
 import { DEFAULT_LIBRARIES } from './data/libraries';
 import { SLIDE_TEMPLATES } from './data/starterDeck';
-import { exportStandaloneHtml } from './utils/htmlImporter';
+import { exportStandaloneHtml, mergeSharedCss } from './utils/htmlImporter';
 import {
   getAllThemes,
   loadActiveDeckId,
@@ -205,17 +205,18 @@ export default function App() {
   );
 
   const handleImportSlides = useCallback(
-    (slides: Slide[], target: 'append' | 'new-deck', title?: string) => {
+    (slides: Slide[], target: 'append' | 'new-deck', title?: string, sharedCss?: string) => {
       if (target === 'new-deck') {
         const newDeck: Deck = {
           id: `deck-${Date.now()}`,
           title: title || 'Imported AI Presentation',
           description: 'Imported from HTML/CSS.',
           themeId: activeDeck.themeId,
-          aspectRatio: activeDeck.aspectRatio,
+          aspectRatio: '16:9',
           defaultTransition: 'fade',
           libraries: { ...activeDeck.libraries },
           customResources: [],
+          sharedCss,
           slides,
           snapshots: [],
           updatedAt: new Date().toISOString(),
@@ -224,13 +225,14 @@ export default function App() {
         setActiveDeckId(newDeck.id);
         setActiveSlideIndex(0);
         setActiveTab('studio');
-        showToast(`Created deck with ${slides.length} slides`);
+        showToast(`Created deck with ${slides.length} ${slides.length === 1 ? 'slide' : 'slides'}`);
         return;
       }
 
       const startIndex = activeDeck.slides.length;
       updateActiveDeck((d) => ({
         ...d,
+        sharedCss: mergeSharedCss(d.sharedCss, sharedCss),
         updatedAt: new Date().toISOString(),
         slides: [...d.slides, ...slides],
       }));
@@ -421,6 +423,7 @@ export default function App() {
             slideCount: d.slides.length,
             themeId: d.themeId,
             libraries: { ...d.libraries },
+            sharedCss: d.sharedCss,
             slides: d.slides.map((s) => ({ ...s })),
           },
           ...d.snapshots,
@@ -439,6 +442,7 @@ export default function App() {
         ...d,
         themeId: snap.themeId,
         libraries: { ...snap.libraries },
+        sharedCss: snap.sharedCss ?? d.sharedCss,
         slides: snap.slides.map((s) => ({ ...s })),
         updatedAt: new Date().toISOString(),
       }));

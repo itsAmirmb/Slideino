@@ -11,6 +11,7 @@ export interface BuildSlideOptions {
   theme: SlideTheme;
   libraries: LibraryConfig;
   customResources: CustomResource[];
+  sharedCss?: string;
   instanceId: string;
   origin: string;
   isThumbnail?: boolean;
@@ -19,6 +20,13 @@ export interface BuildSlideOptions {
 
 function escapeStyleClose(css: string): string {
   return css.replace(/<\/style/gi, '<\\/style');
+}
+
+function stripConflictingMetaTags(html: string): string {
+  return html.replace(
+    /<meta\b[^>]*http-equiv\s*=\s*["']?content-security-policy["']?[^>]*>/gi,
+    ''
+  );
 }
 
 function resolveLocalAssetPaths(html: string, origin: string): string {
@@ -36,71 +44,74 @@ function buildLibraryHeadTags(
   libraries: LibraryConfig,
   theme: SlideTheme,
   customResources: CustomResource[],
-  isThumbnail: boolean
+  isThumbnail: boolean,
+  isStandalone: boolean
 ): string {
   const tags: string[] = [];
 
-  // Google Fonts for built-in typography families
-  tags.push(
-    `<link rel="preconnect" href="https://fonts.googleapis.com">`,
-    `<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>`,
-    `<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=JetBrains+Mono:wght@400;500;600&family=Playfair+Display:wght@500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap">`
-  );
-
-  if (libraries.tailwind) {
-    tags.push(`<script src="https://cdn.tailwindcss.com"></script>`);
-  }
-
-  if (libraries.katex) {
+  if (!isStandalone) {
+    // Google Fonts for built-in typography families
     tags.push(
-      `<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">`,
-      `<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>`,
-      `<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>`
+      `<link rel="preconnect" href="https://fonts.googleapis.com">`,
+      `<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>`,
+      `<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=JetBrains+Mono:wght@400;500;600&family=Playfair+Display:wght@500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap">`
     );
-  }
 
-  if (libraries.highlightjs) {
-    const hlTheme = theme.isDark ? 'github-dark' : 'github';
-    tags.push(
-      `<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.10.0/styles/${hlTheme}.min.css">`,
-      `<script defer src="https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.10.0/highlight.min.js"></script>`
-    );
-  }
+    if (libraries.tailwind) {
+      tags.push(`<script src="https://cdn.tailwindcss.com"></script>`);
+    }
 
-  if (libraries.mermaid) {
-    tags.push(
-      `<script defer src="https://cdn.jsdelivr.net/npm/mermaid@11.4.0/dist/mermaid.min.js"></script>`
-    );
-  }
+    if (libraries.katex) {
+      tags.push(
+        `<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">`,
+        `<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>`,
+        `<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>`
+      );
+    }
 
-  if (libraries.chartjs) {
-    tags.push(
-      `<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>`
-    );
-  }
+    if (libraries.highlightjs) {
+      const hlTheme = theme.isDark ? 'github-dark' : 'github';
+      tags.push(
+        `<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.10.0/styles/${hlTheme}.min.css">`,
+        `<script defer src="https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.10.0/highlight.min.js"></script>`
+      );
+    }
 
-  if (libraries.lucide) {
-    tags.push(
-      `<script defer src="https://cdn.jsdelivr.net/npm/lucide@0.460.0/dist/umd/lucide.min.js"></script>`
-    );
-  }
+    if (libraries.mermaid) {
+      tags.push(
+        `<script defer src="https://cdn.jsdelivr.net/npm/mermaid@11.4.0/dist/mermaid.min.js"></script>`
+      );
+    }
 
-  if (libraries.fontawesome) {
-    tags.push(
-      `<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css">`
-    );
-  }
+    if (libraries.chartjs) {
+      tags.push(
+        `<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>`
+      );
+    }
 
-  if (libraries.animatecss && !isThumbnail) {
-    tags.push(
-      `<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css">`
-    );
-  }
+    if (libraries.lucide) {
+      tags.push(
+        `<script defer src="https://cdn.jsdelivr.net/npm/lucide@0.460.0/dist/umd/lucide.min.js"></script>`
+      );
+    }
 
-  if (libraries.d3) {
-    tags.push(
-      `<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>`
-    );
+    if (libraries.fontawesome) {
+      tags.push(
+        `<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css">`
+      );
+    }
+
+    if (libraries.animatecss && !isThumbnail) {
+      tags.push(
+        `<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css">`
+      );
+    }
+
+    if (libraries.d3) {
+      tags.push(
+        `<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>`
+      );
+    }
   }
 
   for (const res of customResources) {
@@ -116,12 +127,7 @@ function buildLibraryHeadTags(
   return tags.join('\n');
 }
 
-function buildThemeCss(
-  theme: SlideTheme,
-  slide: Slide,
-  prefersReducedMotion: boolean,
-  isThumbnail: boolean
-): string {
+function buildRootVariablesCss(theme: SlideTheme, slide: Slide): string {
   const bg = slide.backgroundOverride?.trim() || theme.tokens.bg;
   return `
 :root {
@@ -138,7 +144,33 @@ function buildThemeCss(
   --slide-radius: ${theme.tokens.radius}px;
   --slide-padding: ${theme.tokens.padding}px;
 }
+`;
+}
 
+function buildMotionCss(prefersReducedMotion: boolean, isThumbnail: boolean): string {
+  return prefersReducedMotion || isThumbnail
+    ? `*, *::before, *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+}`
+    : `@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}`;
+}
+
+function buildThemeCss(
+  theme: SlideTheme,
+  slide: Slide,
+  prefersReducedMotion: boolean,
+  isThumbnail: boolean
+): string {
+  return `
+${buildRootVariablesCss(theme, slide)}
 *, *::before, *::after {
   box-sizing: border-box;
 }
@@ -165,25 +197,29 @@ img, svg, canvas, video {
   background: var(--slide-surface) !important;
 }
 
-${
-  prefersReducedMotion || isThumbnail
-    ? `*, *::before, *::after {
-  animation-duration: 0.001ms !important;
-  animation-iteration-count: 1 !important;
-  transition-duration: 0.001ms !important;
-}`
-    : `@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.001ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.001ms !important;
-  }
-}`
-}
+${buildMotionCss(prefersReducedMotion, isThumbnail)}
 
 ${escapeStyleClose(theme.customCss || '')}
 ${escapeStyleClose(slide.css || '')}
 `;
+}
+
+function buildStandaloneOverrideCss(
+  slide: Slide,
+  prefersReducedMotion: boolean,
+  isThumbnail: boolean
+): string {
+  const parts: string[] = [buildMotionCss(prefersReducedMotion, isThumbnail)];
+
+  if (slide.backgroundOverride?.trim()) {
+    parts.push(`html, body { background: ${slide.backgroundOverride.trim()} !important; }`);
+  }
+
+  if (slide.css?.trim()) {
+    parts.push(escapeStyleClose(slide.css));
+  }
+
+  return parts.join('\n');
 }
 
 function buildRuntimeBootstrapScript(
@@ -305,17 +341,32 @@ export function buildSlideDocument(options: BuildSlideOptions): string {
     theme,
     libraries,
     customResources,
+    sharedCss,
     instanceId,
     origin,
     isThumbnail = false,
     prefersReducedMotion = false,
   } = options;
 
-  const processedHtml = resolveLocalAssetPaths(slide.html || '', origin);
-  const headTags = buildLibraryHeadTags(libraries, theme, customResources, isThumbnail);
-  const themeStyleTag = `<style data-slideino-theme="true">${escapeStyleClose(
-    buildThemeCss(theme, slide, prefersReducedMotion, isThumbnail)
-  )}</style>`;
+  const processedHtml = resolveLocalAssetPaths(
+    stripConflictingMetaTags(slide.html || ''),
+    origin
+  );
+
+  // Detect if slide is a complete HTML document (<!DOCTYPE html> or <html>)
+  const isFullDocument = /<!doctype\s+html|<html[\s>]/i.test(processedHtml);
+  const isStandalone = Boolean(slide.standalone) || isFullDocument;
+
+  const headTags = buildLibraryHeadTags(
+    libraries,
+    theme,
+    customResources,
+    isThumbnail,
+    isStandalone
+  );
+  const sharedStyleTag = sharedCss?.trim()
+    ? `<style data-slideino-shared="true">${escapeStyleClose(sharedCss)}</style>`
+    : '';
   const runtimeScript = buildRuntimeBootstrapScript(
     instanceId,
     theme,
@@ -323,17 +374,45 @@ export function buildSlideDocument(options: BuildSlideOptions): string {
     isThumbnail
   );
 
-  // Detect if user pasted a complete HTML document (<!DOCTYPE html> or <html>)
-  const isFullDocument = /<!doctype\s+html|<html[\s>]/i.test(processedHtml);
-
   if (isFullDocument) {
     let doc = processedHtml;
-    if (/<\/head>/i.test(doc)) {
-      doc = doc.replace(/<\/head>/i, `${headTags}\n${themeStyleTag}\n</head>`);
-    } else if (/<body[\s>]/i.test(doc)) {
-      doc = doc.replace(/<body/i, `<head>${headTags}\n${themeStyleTag}</head><body`);
+    const basePrefix = [
+      `<style data-slideino-tokens="true">${escapeStyleClose(
+        buildRootVariablesCss(theme, slide)
+      )}</style>`,
+      sharedStyleTag,
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    const overrideSuffix = [
+      headTags,
+      `<style data-slideino-overrides="true">${escapeStyleClose(
+        buildStandaloneOverrideCss(slide, prefersReducedMotion, isThumbnail)
+      )}</style>`,
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    // Inject tokens + shared fonts at the beginning of <head> so the slide's own styles take priority
+    if (/<head[^>]*>/i.test(doc)) {
+      doc = doc.replace(/<head[^>]*>/i, (match) => `${match}\n${basePrefix}`);
+    } else if (/<html[^>]*>/i.test(doc)) {
+      doc = doc.replace(/<html[^>]*>/i, (match) => `${match}\n<head>\n${basePrefix}`);
+      if (!/<\/head>/i.test(doc) && /<body[\s>]/i.test(doc)) {
+        doc = doc.replace(/<body/i, `</head>\n<body`);
+      }
     } else {
-      doc = `${headTags}\n${themeStyleTag}\n${doc}`;
+      doc = `${basePrefix}\n${doc}`;
+    }
+
+    // Inject user overrides & custom resources at the end of </head>
+    if (/<\/head>/i.test(doc)) {
+      doc = doc.replace(/<\/head>/i, `${overrideSuffix}\n</head>`);
+    } else if (/<body[\s>]/i.test(doc)) {
+      doc = doc.replace(/<body/i, `${overrideSuffix}\n<body`);
+    } else {
+      doc = `${overrideSuffix}\n${doc}`;
     }
 
     if (/<\/body>/i.test(doc)) {
@@ -344,12 +423,17 @@ export function buildSlideDocument(options: BuildSlideOptions): string {
     return doc;
   }
 
+  const themeStyleTag = `<style data-slideino-theme="true">${escapeStyleClose(
+    buildThemeCss(theme, slide, prefersReducedMotion, isThumbnail)
+  )}</style>`;
+
   // Wrap HTML fragment cleanly
   return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  ${sharedStyleTag}
   ${headTags}
   ${themeStyleTag}
 </head>

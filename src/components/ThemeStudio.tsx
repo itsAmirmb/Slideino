@@ -243,6 +243,7 @@ export const ThemeStudio: React.FC<ThemeStudioProps> = ({
                   theme={selectedTheme}
                   libraries={deck.libraries}
                   customResources={deck.customResources}
+                  sharedCss={deck.sharedCss}
                   aspectRatio="16:9"
                   isThumbnail
                 />

@@ -386,6 +386,7 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
                             theme={activeTheme}
                             libraries={deck.libraries}
                             customResources={deck.customResources}
+                            sharedCss={deck.sharedCss}
                             aspectRatio={deck.aspectRatio}
                             isThumbnail
                           />
@@ -470,6 +471,7 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
                   theme={activeTheme}
                   libraries={deck.libraries}
                   customResources={deck.customResources}
+                  sharedCss={deck.sharedCss}
                   aspectRatio={deck.aspectRatio}
                   onForwardKey={handleStageKeyForward}
                 />

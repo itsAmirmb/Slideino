@@ -50,6 +50,7 @@ export interface Slide {
   transition: TransitionType;
   hidden?: boolean;
   backgroundOverride?: string;
+  standalone?: boolean;
 }
 
 export interface SlideTheme {
@@ -83,6 +84,7 @@ export interface DeckSnapshot {
   slides: Slide[];
   themeId: string;
   libraries: LibraryConfig;
+  sharedCss?: string;
 }
 
 export interface Deck {
@@ -94,6 +96,7 @@ export interface Deck {
   defaultTransition: TransitionType;
   libraries: LibraryConfig;
   customResources: CustomResource[];
+  sharedCss?: string;
   slides: Slide[];
   snapshots: DeckSnapshot[];
   updatedAt: string;

@@ -215,6 +215,7 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
                 theme={theme}
                 libraries={deck.libraries}
                 customResources={deck.customResources}
+                sharedCss={deck.sharedCss}
                 aspectRatio={deck.aspectRatio}
                 onForwardKey={(key) => handleKeyAction(key)}
               />
@@ -262,6 +263,7 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
                     theme={theme}
                     libraries={deck.libraries}
                     customResources={deck.customResources}
+                    sharedCss={deck.sharedCss}
                     aspectRatio={deck.aspectRatio}
                     isThumbnail
                   />
@@ -312,6 +314,7 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
             theme={theme}
             libraries={deck.libraries}
             customResources={deck.customResources}
+            sharedCss={deck.sharedCss}
             aspectRatio={deck.aspectRatio}
             onForwardKey={(key) => handleKeyAction(key)}
           />
@@ -479,6 +482,7 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
                       theme={theme}
                       libraries={deck.libraries}
                       customResources={deck.customResources}
+                      sharedCss={deck.sharedCss}
                       aspectRatio={deck.aspectRatio}
                       isThumbnail
                     />

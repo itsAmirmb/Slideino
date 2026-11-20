@@ -15,6 +15,7 @@ interface SlideFrameProps {
   theme: SlideTheme;
   libraries: LibraryConfig;
   customResources: CustomResource[];
+  sharedCss?: string;
   aspectRatio: AspectRatio;
   isThumbnail?: boolean;
   onForwardKey?: (key: string, shiftKey: boolean) => void;
@@ -26,6 +27,7 @@ export const SlideFrame: React.FC<SlideFrameProps> = ({
   theme,
   libraries,
   customResources,
+  sharedCss,
   aspectRatio,
   isThumbnail = false,
   onForwardKey,
@@ -97,12 +99,13 @@ export const SlideFrame: React.FC<SlideFrameProps> = ({
         theme,
         libraries,
         customResources,
+        sharedCss,
         instanceId,
         origin,
         isThumbnail,
         prefersReducedMotion,
       }),
-    [slide, theme, libraries, customResources, instanceId, origin, isThumbnail, prefersReducedMotion]
+    [slide, theme, libraries, customResources, sharedCss, instanceId, origin, isThumbnail, prefersReducedMotion]
   );
 
   const isFluid = aspectRatio === 'fluid';

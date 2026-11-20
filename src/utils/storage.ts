@@ -37,6 +37,7 @@ export function loadDecks(): Deck[] {
       ...d,
       libraries: { ...DEFAULT_LIBRARIES, ...(d.libraries || {}) },
       customResources: Array.isArray(d.customResources) ? d.customResources : [],
+      sharedCss: typeof d.sharedCss === 'string' ? d.sharedCss : undefined,
       snapshots: Array.isArray(d.snapshots) ? d.snapshots : [],
       slides: Array.isArray(d.slides) && d.slides.length > 0 ? d.slides : createStarterDeck().slides.slice(0, 1),
     }));
@@ -51,7 +52,16 @@ export function saveDecks(decks: Deck[]): void {
   try {
     localStorage.setItem(STORAGE_KEYS.DECKS, JSON.stringify(decks));
   } catch {
-    // Ignore storage quota errors cleanly
+    // Retry without older snapshots if storage quota was exceeded by large imported decks
+    try {
+      const compactDecks = decks.map((d) => ({
+        ...d,
+        snapshots: d.snapshots.slice(0, 1),
+      }));
+      localStorage.setItem(STORAGE_KEYS.DECKS, JSON.stringify(compactDecks));
+    } catch {
+      // Ignore storage quota errors cleanly
+    }
   }
 }
 
@@ -153,6 +163,7 @@ export function validateImportedDeckJson(raw: string): Deck | null {
           : 'fade',
         hidden: Boolean(s.hidden),
         backgroundOverride: typeof s.backgroundOverride === 'string' ? s.backgroundOverride : undefined,
+        standalone: typeof s.standalone === 'boolean' ? s.standalone : undefined,
       }));
 
     if (validSlides.length === 0) return null;
@@ -180,6 +191,7 @@ export function validateImportedDeckJson(raw: string): Deck | null {
         : 'fade',
       libraries: { ...DEFAULT_LIBRARIES, ...(obj.libraries || {}) },
       customResources: validResources,
+      sharedCss: typeof obj.sharedCss === 'string' ? obj.sharedCss : undefined,
       slides: validSlides,
       snapshots: [],
       updatedAt: new Date().toISOString(),
