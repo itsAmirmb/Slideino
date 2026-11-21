@@ -13,6 +13,8 @@ import {
   Image as ImageIcon,
   Laptop,
   Magnet,
+  Maximize2,
+  Minimize2,
   Minus,
   Moon,
   MousePointer2,
@@ -29,6 +31,8 @@ import {
   Type,
   Undo2,
   Upload,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react';
 import {
   AspectRatio,
@@ -78,6 +82,7 @@ interface SlideHistoryStack {
 }
 
 const MAX_HISTORY_ENTRIES = 50;
+const ZOOM_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
 export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
   deck,
@@ -98,6 +103,11 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
 }) => {
   const [leftRailOpen, setLeftRailOpen] = useState(true);
   const [rightInspectorOpen, setRightInspectorOpen] = useState(true);
+  const [leftRailWidth, setLeftRailWidth] = useState(204);
+  const [rightInspectorWidth, setRightInspectorWidth] = useState(316);
+  const [resizingPanel, setResizingPanel] = useState<'left' | 'right' | null>(null);
+  const [canvasZoom, setCanvasZoom] = useState<'fit' | number>('fit');
+  const [effectiveScale, setEffectiveScale] = useState(1);
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('design');
   const [editMode, setEditMode] = useState(true);
   const [snapEnabled, setSnapEnabled] = useState(true);
@@ -113,6 +123,7 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
 
   const stageFrameRef = useRef<SlideFrameHandle>(null);
   const quickImageInputRef = useRef<HTMLInputElement>(null);
+  const panelResizeStartRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const historyMapRef = useRef<Record<string, SlideHistoryStack>>({});
   const lastCommittedHtmlRef = useRef<Record<string, SlideEditSnapshot>>({});
   const codeHistoryTimerRef = useRef<number | null>(null);
@@ -246,7 +257,62 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
     return (historyMapRef.current[activeSlide.id]?.future.length || 0) > 0;
   }, [activeSlide.id, historyTick]);
 
-  // Host keyboard shortcuts for Undo/Redo when not focused in a native text input
+  const handleZoomIn = useCallback(() => {
+    setCanvasZoom((prev) => {
+      const current = prev === 'fit' ? effectiveScale : prev;
+      const nextStep = ZOOM_STEPS.find((z) => z > current + 0.04);
+      return nextStep ?? 2;
+    });
+  }, [effectiveScale]);
+
+  const handleZoomOut = useCallback(() => {
+    setCanvasZoom((prev) => {
+      const current = prev === 'fit' ? effectiveScale : prev;
+      const reversed = [...ZOOM_STEPS].reverse();
+      const nextStep = reversed.find((z) => z < current - 0.04);
+      return nextStep ?? 0.5;
+    });
+  }, [effectiveScale]);
+
+  const handleToggleFocusCanvas = useCallback(() => {
+    const isExpanded = !leftRailOpen && !rightInspectorOpen;
+    if (isExpanded) {
+      setLeftRailOpen(true);
+      setRightInspectorOpen(true);
+    } else {
+      setLeftRailOpen(false);
+      setRightInspectorOpen(false);
+    }
+  }, [leftRailOpen, rightInspectorOpen]);
+
+  // Drag-resize left and right panels smoothly without iframe pointer capture issues
+  useEffect(() => {
+    if (!resizingPanel) return;
+    const onMove = (e: PointerEvent) => {
+      const start = panelResizeStartRef.current;
+      if (!start) return;
+      const dx = e.clientX - start.startX;
+      if (resizingPanel === 'left') {
+        setLeftRailWidth(Math.max(156, Math.min(340, Math.round(start.startWidth + dx))));
+      } else {
+        setRightInspectorWidth(Math.max(264, Math.min(480, Math.round(start.startWidth - dx))));
+      }
+    };
+    const onUp = () => {
+      setResizingPanel(null);
+      panelResizeStartRef.current = null;
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+    };
+  }, [resizingPanel]);
+
+  // Host keyboard shortcuts for Undo/Redo and Zoom when not focused in a native text input
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
@@ -264,11 +330,20 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
       } else if (mod && e.key.toLowerCase() === 'y') {
         e.preventDefault();
         handleRedo();
+      } else if (mod && (e.key === '=' || e.key === '+')) {
+        e.preventDefault();
+        handleZoomIn();
+      } else if (mod && e.key === '-') {
+        e.preventDefault();
+        handleZoomOut();
+      } else if (mod && e.key === '0') {
+        e.preventDefault();
+        setCanvasZoom('fit');
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [handleUndo, handleRedo]);
+  }, [handleUndo, handleRedo, handleZoomIn, handleZoomOut]);
 
   const handleVisualHtmlChange = useCallback(
     (newHtml: string, commit: boolean) => {
@@ -367,9 +442,6 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
 
   const handleElementSelect = useCallback((element: SelectedElementInfo | null) => {
     setSelectedElement(element);
-    if (element) {
-      setRightInspectorOpen(true);
-    }
   }, []);
 
   const handleLayersChange = useCallback(
@@ -595,13 +667,20 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
       </div>
 
       {/* 3-Pane Studio Body */}
-      <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
+      <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden relative">
+        {/* Transparent shield while dragging panel splitters so the slide iframe never swallows mouse events */}
+        {resizingPanel && (
+          <div className="fixed inset-0 z-50 cursor-col-resize select-none" aria-hidden="true" />
+        )}
+
         {/* Left Slide Navigator Rail */}
         {leftRailOpen && (
-          <aside
-            aria-label="Slide navigator"
-            className="w-full lg:w-64 xl:w-72 shrink-0 bg-white dark:bg-slate-900 border-b lg:border-b-0 lg:border-r border-slate-200 dark:border-slate-800 flex flex-col max-h-56 lg:max-h-none"
-          >
+          <>
+            <aside
+              aria-label="Slide navigator"
+              style={{ '--left-rail-w': `${leftRailWidth}px` } as React.CSSProperties}
+              className="w-full lg:w-[var(--left-rail-w)] shrink-0 bg-white dark:bg-slate-900 border-b lg:border-b-0 lg:border-r border-slate-200 dark:border-slate-800 flex flex-col max-h-56 lg:max-h-none"
+            >
             <div className="p-3 border-b border-slate-200 dark:border-slate-800 flex items-center gap-2">
               <div className="relative flex-1">
                 <Search
@@ -758,7 +837,21 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
                 })
               )}
             </div>
-          </aside>
+            </aside>
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize slide list panel"
+              onPointerDown={(e) => {
+                e.preventDefault();
+                panelResizeStartRef.current = { startX: e.clientX, startWidth: leftRailWidth };
+                setResizingPanel('left');
+              }}
+              onDoubleClick={() => setLeftRailWidth(204)}
+              title="Drag to resize slide list (double-click to reset)"
+              className="hidden lg:block w-1.5 -ml-0.5 shrink-0 cursor-col-resize bg-transparent hover:bg-blue-500/35 active:bg-blue-500/50 transition-colors z-10"
+            />
+          </>
         )}
 
         {/* Center Focal Stage */}
@@ -899,15 +992,59 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
                   <Magnet className="w-3.5 h-3.5" aria-hidden="true" />
                   <span className="hidden sm:inline">Snap</span>
                 </button>
+
+                <button
+                  type="button"
+                  onClick={handleToggleFocusCanvas}
+                  aria-pressed={!leftRailOpen && !rightInspectorOpen}
+                  className={`h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg border text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                    !leftRailOpen && !rightInspectorOpen
+                      ? 'border-blue-600/40 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300'
+                      : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
+                  }`}
+                  title={
+                    !leftRailOpen && !rightInspectorOpen
+                      ? 'Restore side panels'
+                      : 'Expand slide canvas (hide side panels)'
+                  }
+                >
+                  {!leftRailOpen && !rightInspectorOpen ? (
+                    <Minimize2 className="w-3.5 h-3.5" aria-hidden="true" />
+                  ) : (
+                    <Maximize2 className="w-3.5 h-3.5" aria-hidden="true" />
+                  )}
+                  <span className="hidden xl:inline">
+                    {!leftRailOpen && !rightInspectorOpen ? 'Restore' : 'Expand'}
+                  </span>
+                </button>
               </div>
             )}
           </div>
 
-          <div className="flex-1 min-h-0 p-4 sm:p-6 flex items-center justify-center overflow-hidden">
+          <div
+            onWheel={(e) => {
+              if (e.ctrlKey || e.metaKey) {
+                e.preventDefault();
+                if (e.deltaY < 0) handleZoomIn();
+                else if (e.deltaY > 0) handleZoomOut();
+              }
+            }}
+            className={`flex-1 min-h-0 flex items-center justify-center overflow-hidden ${
+              canvasZoom === 'fit' ? 'p-2.5 sm:p-3.5' : 'p-0'
+            }`}
+          >
             <div
-              className={`w-full h-full ${deviceWidthClass} mx-auto flex items-center justify-center transition-[max-width] duration-200`}
+              className={`w-full h-full ${
+                canvasZoom === 'fit' ? deviceWidthClass : 'max-w-full'
+              } mx-auto flex items-center justify-center transition-[max-width] duration-200`}
             >
-              <div className="w-full h-full flex items-center justify-center rounded-xl overflow-hidden shadow-md border border-slate-200/90 dark:border-slate-800 bg-slate-200/40 dark:bg-slate-900/50">
+              <div
+                className={`w-full h-full flex items-center justify-center overflow-hidden ${
+                  canvasZoom === 'fit'
+                    ? 'rounded-lg shadow-sm border border-slate-200/90 dark:border-slate-800 bg-slate-200/35 dark:bg-slate-900/40'
+                    : 'bg-slate-200/45 dark:bg-slate-950'
+                }`}
+              >
                 <SlideFrame
                   ref={stageFrameRef}
                   slide={activeSlide}
@@ -917,6 +1054,8 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
                   sharedCss={deck.sharedCss}
                   aspectRatio={deck.aspectRatio}
                   editMode={editMode}
+                  zoom={canvasZoom}
+                  onScaleChange={setEffectiveScale}
                   onForwardKey={handleStageKeyForward}
                   onVisualHtmlChange={handleVisualHtmlChange}
                   onElementSelect={handleElementSelect}
@@ -928,35 +1067,91 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
             </div>
           </div>
 
-          {/* Stage Footer Transport Bar */}
-          <div className="px-4 sm:px-6 py-2.5 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600 dark:text-slate-400">
+          {/* Stage Footer Transport & Zoom Bar */}
+          <div className="px-3 sm:px-5 py-2 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600 dark:text-slate-400">
             <div className="flex items-center gap-2 min-w-0">
-              <span className="font-medium text-slate-900 dark:text-slate-100 truncate">
+              <span className="font-medium text-slate-900 dark:text-slate-100 truncate max-w-[180px] sm:max-w-[240px]">
                 {activeSlide.title}
               </span>
-              <span aria-hidden="true">·</span>
-              <span className="whitespace-nowrap">{deck.aspectRatio}</span>
-              <span aria-hidden="true" className="hidden sm:inline">·</span>
-              <span className="hidden sm:inline whitespace-nowrap">
+              <span aria-hidden="true" className="hidden md:inline">·</span>
+              <span className="hidden md:inline whitespace-nowrap truncate">
                 {editMode
                   ? selectedElement
-                    ? `Selected: ${selectedElement.friendlyName} · Drag to move · Double-click text`
+                    ? `Selected: ${selectedElement.friendlyName} · Drag to move`
                     : 'Click to select · Drag selected to move'
                   : activeTheme.name}
               </span>
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
+              {/* Canvas Zoom Controls */}
+              {deck.aspectRatio !== 'fluid' && (
+                <div
+                  role="group"
+                  aria-label="Canvas zoom controls"
+                  className="flex items-center gap-1 pr-2 border-r border-slate-200 dark:border-slate-800"
+                >
+                  <button
+                    type="button"
+                    onClick={handleZoomOut}
+                    className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
+                    aria-label="Zoom out canvas"
+                    title="Zoom Out (Ctrl/Cmd -)"
+                  >
+                    <ZoomOut className="w-3.5 h-3.5" />
+                  </button>
+
+                  <select
+                    aria-label="Canvas zoom level"
+                    value={canvasZoom === 'fit' ? 'fit' : String(canvasZoom)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setCanvasZoom(val === 'fit' ? 'fit' : Number(val));
+                    }}
+                    className="h-7 px-1.5 rounded-md bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-mono text-[11px] tabular-nums text-slate-800 dark:text-slate-200 cursor-pointer"
+                  >
+                    <option value="fit">Fit ({Math.round(effectiveScale * 100)}%)</option>
+                    <option value="0.5">50%</option>
+                    <option value="0.75">75%</option>
+                    <option value="1">100% (1:1 Sharp)</option>
+                    <option value="1.25">125%</option>
+                    <option value="1.5">150%</option>
+                    <option value="2">200%</option>
+                  </select>
+
+                  <button
+                    type="button"
+                    onClick={handleZoomIn}
+                    className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
+                    aria-label="Zoom in canvas"
+                    title="Zoom In (Ctrl/Cmd +)"
+                  >
+                    <ZoomIn className="w-3.5 h-3.5" />
+                  </button>
+
+                  {canvasZoom !== 'fit' && (
+                    <button
+                      type="button"
+                      onClick={() => setCanvasZoom('fit')}
+                      className="h-7 px-2 rounded-md border border-slate-200 dark:border-slate-700 text-[11px] font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer whitespace-nowrap"
+                      title="Reset zoom to fit screen (Ctrl/Cmd 0)"
+                    >
+                      Fit
+                    </button>
+                  )}
+                </div>
+              )}
+
               <button
                 type="button"
                 onClick={() => onSelectSlide(Math.max(0, activeSlideIndex - 1))}
                 disabled={activeSlideIndex === 0}
-                className="w-8 h-8 inline-flex items-center justify-center rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-35 cursor-pointer"
+                className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-35 cursor-pointer"
                 aria-label="Previous slide"
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
-              <span className="font-mono tabular-nums text-slate-900 dark:text-slate-100 min-w-[54px] text-center">
+              <span className="font-mono tabular-nums text-slate-900 dark:text-slate-100 min-w-[48px] text-center">
                 {String(activeSlideIndex + 1).padStart(2, '0')} /{' '}
                 {String(deck.slides.length).padStart(2, '0')}
               </span>
@@ -964,7 +1159,7 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
                 type="button"
                 onClick={() => onSelectSlide(Math.min(deck.slides.length - 1, activeSlideIndex + 1))}
                 disabled={activeSlideIndex === deck.slides.length - 1}
-                className="w-8 h-8 inline-flex items-center justify-center rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-35 cursor-pointer"
+                className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-35 cursor-pointer"
                 aria-label="Next slide"
               >
                 <ChevronRight className="w-4 h-4" />
@@ -975,10 +1170,28 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
 
         {/* Right Design, Code & Properties Inspector */}
         {rightInspectorOpen && (
-          <aside
-            aria-label="Slide design, code, and settings inspector"
-            className="w-full lg:w-[360px] xl:w-[400px] shrink-0 bg-white dark:bg-slate-900 border-t lg:border-t-0 lg:border-l border-slate-200 dark:border-slate-800 flex flex-col min-h-[300px] lg:min-h-0"
-          >
+          <>
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize inspector panel"
+              onPointerDown={(e) => {
+                e.preventDefault();
+                panelResizeStartRef.current = {
+                  startX: e.clientX,
+                  startWidth: rightInspectorWidth,
+                };
+                setResizingPanel('right');
+              }}
+              onDoubleClick={() => setRightInspectorWidth(316)}
+              title="Drag to resize inspector (double-click to reset)"
+              className="hidden lg:block w-1.5 -mr-0.5 shrink-0 cursor-col-resize bg-transparent hover:bg-blue-500/35 active:bg-blue-500/50 transition-colors z-10"
+            />
+            <aside
+              aria-label="Slide design, code, and settings inspector"
+              style={{ '--right-inspector-w': `${rightInspectorWidth}px` } as React.CSSProperties}
+              className="w-full lg:w-[var(--right-inspector-w)] shrink-0 bg-white dark:bg-slate-900 border-t lg:border-t-0 lg:border-l border-slate-200 dark:border-slate-800 flex flex-col min-h-[300px] lg:min-h-0"
+            >
             {/* Inspector Tabs */}
             <div className="px-3 pt-2.5 pb-2 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2">
               <div
@@ -1186,7 +1399,8 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
                 </div>
               )}
             </div>
-          </aside>
+            </aside>
+          </>
         )}
       </div>
     </div>

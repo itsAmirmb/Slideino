@@ -34,6 +34,8 @@ interface SlideFrameProps {
   aspectRatio: AspectRatio;
   isThumbnail?: boolean;
   editMode?: boolean;
+  zoom?: 'fit' | number;
+  onScaleChange?: (scale: number) => void;
   onForwardKey?: (key: string, shiftKey: boolean) => void;
   onVisualHtmlChange?: (html: string, commit: boolean) => void;
   onElementSelect?: (element: SelectedElementInfo | null) => void;
@@ -58,6 +60,8 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(
       aspectRatio,
       isThumbnail = false,
       editMode = false,
+      zoom = 'fit',
+      onScaleChange,
       onForwardKey,
       onVisualHtmlChange,
       onElementSelect,
@@ -76,8 +80,11 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(
       [reactId, slide.id]
     );
 
-    // Track HTML emitted directly from the visual editor iframe so we never reload/flicker on self-edits
+    // Track HTML emitted directly from the visual editor iframe so we never reload/flicker on self-edits,
+    // while guaranteeing external reverts (like Undo back to the initial HTML) ALWAYS reload the iframe.
     const lastVisualHtmlRef = useRef<string | null>(null);
+    const iframeMutatedLiveRef = useRef<boolean>(false);
+    const reloadRevRef = useRef<number>(0);
     const prevDocMetaRef = useRef<string>('');
     const cachedSrcDocRef = useRef<string>('');
 
@@ -160,6 +167,7 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(
           data.payload &&
           typeof data.payload.html === 'string'
         ) {
+          iframeMutatedLiveRef.current = true;
           lastVisualHtmlRef.current = data.payload.html;
           onVisualHtmlChange(data.payload.html, Boolean(data.payload.commit));
         } else if (data.type === 'element-select' && onElementSelect && data.payload) {
@@ -227,10 +235,12 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(
       }
 
       // External change (slide switch, Undo/Redo, raw HTML edit, theme/mode change) -> clear guard & rebuild
+      const hadLiveMutation = iframeMutatedLiveRef.current;
       lastVisualHtmlRef.current = null;
+      iframeMutatedLiveRef.current = false;
       prevDocMetaRef.current = metaKey;
 
-      const built = buildSlideDocument({
+      let built = buildSlideDocument({
         slide,
         theme,
         libraries,
@@ -242,6 +252,14 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(
         editMode: Boolean(editMode && !isThumbnail),
         prefersReducedMotion,
       });
+
+      // If the iframe DOM was mutated live during visual editing and an Undo/Revert brings slide.html
+      // back to the exact initial string, React would skip updating srcDoc unless the string differs.
+      if (hadLiveMutation && built === cachedSrcDocRef.current) {
+        reloadRevRef.current += 1;
+        built = `${built}\n<!-- slideino-rev:${reloadRevRef.current} -->`;
+      }
+
       cachedSrcDocRef.current = built;
       return built;
     }, [
@@ -258,17 +276,25 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(
     ]);
 
     const isFluid = aspectRatio === 'fluid';
+    const isManualZoom = !isThumbnail && !isFluid && typeof zoom === 'number' && Number.isFinite(zoom) && zoom > 0;
     const baseDims = isFluid
       ? { width: 1280, height: 720 }
       : ASPECT_RATIO_DIMENSIONS[aspectRatio];
 
     const scale = useMemo(() => {
+      if (isManualZoom) return zoom as number;
       if (isFluid || containerSize.width === 0 || containerSize.height === 0) return 1;
       return Math.min(
         containerSize.width / baseDims.width,
         containerSize.height / baseDims.height
       );
-    }, [isFluid, containerSize.width, containerSize.height, baseDims.width, baseDims.height]);
+    }, [isManualZoom, zoom, isFluid, containerSize.width, containerSize.height, baseDims.width, baseDims.height]);
+
+    useEffect(() => {
+      if (!isThumbnail && onScaleChange) {
+        onScaleChange(scale);
+      }
+    }, [scale, isThumbnail, onScaleChange]);
 
     const stageWidth = isFluid ? '100%' : `${Math.max(1, Math.floor(baseDims.width * scale))}px`;
     const stageHeight = isFluid ? '100%' : `${Math.max(1, Math.floor(baseDims.height * scale))}px`;
@@ -276,10 +302,16 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(
     return (
       <div
         ref={containerRef}
-        className={`relative w-full h-full flex items-center justify-center overflow-hidden ${className}`}
+        className={`relative w-full h-full flex ${
+          isManualZoom
+            ? 'overflow-auto p-4'
+            : 'items-center justify-center overflow-hidden'
+        } ${className}`}
       >
         <div
-          className="relative overflow-hidden transition-shadow duration-150"
+          className={`relative overflow-hidden transition-shadow duration-150 ${
+            isManualZoom ? 'm-auto shrink-0 shadow-lg rounded-lg ring-1 ring-slate-300/80 dark:ring-slate-700/80' : ''
+          }`}
           style={{
             width: stageWidth,
             height: stageHeight,
