@@ -333,7 +333,7 @@ function buildRuntimeBootstrapScript(
       if (tag === 'input' || tag === 'textarea' || tag === 'select' || (e.target && e.target.isContentEditable)) {
         return;
       }
-      var forwardKeys = ['ArrowRight', 'ArrowLeft', 'ArrowUp', 'ArrowDown', ' ', 'PageDown', 'PageUp', 'Home', 'End', 'Escape', 'f', 'F', 'g', 'G', 'n', 'N', 'b', 'B', '?'];
+      var forwardKeys = ['ArrowRight', 'ArrowLeft', 'ArrowUp', 'ArrowDown', ' ', 'PageDown', 'PageUp', 'Home', 'End', 'Escape', 'f', 'F', 'g', 'G', 'n', 'N', 'b', 'B', 'l', 'L', 'p', 'P', 'h', 'H', 'a', 'A', 'r', 'R', 'e', 'E', 'c', 'C', 'v', 'V', '?'];
       if (forwardKeys.indexOf(e.key) !== -1) {
         postHost('keydown', { key: e.key, shiftKey: !!e.shiftKey });
       }

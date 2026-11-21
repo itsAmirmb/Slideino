@@ -54,6 +54,7 @@ interface SlideFrameProps {
   ) => void;
   onEditorUndo?: () => void;
   onEditorRedo?: () => void;
+  overlay?: React.ReactNode;
   className?: string;
 }
 
@@ -77,6 +78,7 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(
       onLayersChange,
       onEditorUndo,
       onEditorRedo,
+      overlay,
       className = '',
     },
     ref
@@ -397,6 +399,8 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(
                   }
             }
           />
+
+          {!isThumbnail && overlay}
 
           {!isThumbnail && runtimeError && (
             <div

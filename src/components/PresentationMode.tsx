@@ -1,21 +1,37 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ArrowUpRight,
   ChevronLeft,
   ChevronRight,
   Clock,
+  Eraser,
   Grid,
   HelpCircle,
+  Highlighter,
   Maximize2,
   Minimize2,
   MonitorOff,
+  MousePointer2,
   NotebookPen,
   Pause,
+  Pen,
   Play,
+  Radio,
   RotateCcw,
+  Square,
+  Trash2,
+  Undo2,
   X,
 } from 'lucide-react';
 import { Deck, SlideTheme } from '../types/slideino';
 import { SlideFrame } from './SlideFrame';
+import {
+  ANNOTATION_COLORS,
+  ANNOTATION_SIZES,
+  AnnotationStroke,
+  AnnotationTool,
+  PresentationAnnotationLayer,
+} from './PresentationAnnotationLayer';
 
 interface PresentationModeProps {
   deck: Deck;
@@ -54,12 +70,26 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [timerRunning, setTimerRunning] = useState(true);
 
+  // Annotation & laser pointer state (stored per slide so navigating preserves drawings)
+  const [activeTool, setActiveTool] = useState<AnnotationTool>('pointer');
+  const [lastDrawTool, setLastDrawTool] = useState<Exclude<AnnotationTool, 'pointer' | 'laser'>>('pen');
+  const [strokeColor, setStrokeColor] = useState<string>(ANNOTATION_COLORS[0].value);
+  const [strokeSize, setStrokeSize] = useState<number>(ANNOTATION_SIZES[1].value);
+  const [annotationsBySlide, setAnnotationsBySlide] = useState<Record<string, AnnotationStroke[]>>({});
+  const [undoHistoryBySlide, setUndoHistoryBySlide] = useState<Record<string, AnnotationStroke[][]>>({});
+
   const rootRef = useRef<HTMLDivElement>(null);
   const hideTimerRef = useRef<number | null>(null);
+  const dockHoveredRef = useRef(false);
   const touchStartXRef = useRef<number | null>(null);
 
   const currentSlide = slides[currentIndex] || slides[0];
   const nextSlide = slides[currentIndex + 1] || null;
+  const currentAnnotations = useMemo(
+    () => annotationsBySlide[currentSlide.id] || [],
+    [annotationsBySlide, currentSlide.id]
+  );
+  const canUndoAnnotation = (undoHistoryBySlide[currentSlide.id]?.length || 0) > 0;
 
   const goTo = useCallback(
     (index: number) => {
@@ -102,7 +132,9 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
     setControlsVisible(true);
     if (hideTimerRef.current) window.clearTimeout(hideTimerRef.current);
     hideTimerRef.current = window.setTimeout(() => {
-      setControlsVisible(false);
+      if (!dockHoveredRef.current) {
+        setControlsVisible(false);
+      }
     }, 3200);
   }, []);
 
@@ -113,12 +145,88 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
     };
   }, [bumpControls]);
 
+  const selectTool = useCallback(
+    (next: AnnotationTool) => {
+      setActiveTool(next);
+      if (next !== 'pointer' && next !== 'laser') {
+        setLastDrawTool(next);
+      }
+      bumpControls();
+    },
+    [bumpControls]
+  );
+
+  const annotationsBySlideRef = useRef(annotationsBySlide);
+  annotationsBySlideRef.current = annotationsBySlide;
+  const undoHistoryBySlideRef = useRef(undoHistoryBySlide);
+  undoHistoryBySlideRef.current = undoHistoryBySlide;
+
+  const handleCommitStroke = useCallback(
+    (stroke: AnnotationStroke) => {
+      const slideId = currentSlide.id;
+      const current = annotationsBySlideRef.current[slideId] || [];
+      setUndoHistoryBySlide((hPrev) => ({
+        ...hPrev,
+        [slideId]: [...(hPrev[slideId] || []).slice(-29), current],
+      }));
+      setAnnotationsBySlide((prev) => ({
+        ...prev,
+        [slideId]: [...(prev[slideId] || []), stroke],
+      }));
+    },
+    [currentSlide.id]
+  );
+
+  const handleEraseStrokeIds = useCallback(
+    (ids: string[]) => {
+      if (ids.length === 0) return;
+      const idSet = new Set(ids);
+      const slideId = currentSlide.id;
+      const current = annotationsBySlideRef.current[slideId] || [];
+      const filtered = current.filter((s) => !idSet.has(s.id));
+      if (filtered.length === current.length) return;
+      setUndoHistoryBySlide((hPrev) => ({
+        ...hPrev,
+        [slideId]: [...(hPrev[slideId] || []).slice(-29), current],
+      }));
+      setAnnotationsBySlide((prev) => ({
+        ...prev,
+        [slideId]: (prev[slideId] || []).filter((s) => !idSet.has(s.id)),
+      }));
+    },
+    [currentSlide.id]
+  );
+
+  const handleUndoAnnotation = useCallback(() => {
+    const slideId = currentSlide.id;
+    const stack = undoHistoryBySlideRef.current[slideId];
+    if (!stack || stack.length === 0) return;
+    const previousState = stack[stack.length - 1];
+    setUndoHistoryBySlide((hPrev) => ({
+      ...hPrev,
+      [slideId]: (hPrev[slideId] || []).slice(0, -1),
+    }));
+    setAnnotationsBySlide((aPrev) => ({ ...aPrev, [slideId]: previousState }));
+  }, [currentSlide.id]);
+
+  const handleClearSlideAnnotations = useCallback(() => {
+    const slideId = currentSlide.id;
+    const current = annotationsBySlideRef.current[slideId] || [];
+    if (current.length === 0) return;
+    setUndoHistoryBySlide((hPrev) => ({
+      ...hPrev,
+      [slideId]: [...(hPrev[slideId] || []).slice(-29), current],
+    }));
+    setAnnotationsBySlide((prev) => ({ ...prev, [slideId]: [] }));
+  }, [currentSlide.id]);
+
   const handleKeyAction = useCallback(
     (key: string) => {
       if (key === 'Escape') {
         if (helpOpen) setHelpOpen(false);
         else if (gridOpen) setGridOpen(false);
         else if (blackout) setBlackout(false);
+        else if (activeTool !== 'pointer') selectTool('pointer');
         else onExit(currentIndex);
         return;
       }
@@ -139,17 +247,51 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
         setBlackout((v) => !v);
       } else if (key === 'f' || key === 'F') {
         toggleFullscreen();
+      } else if (key === 'l' || key === 'L') {
+        selectTool(activeTool === 'laser' ? 'pointer' : 'laser');
+      } else if (key === 'p' || key === 'P') {
+        selectTool(activeTool === 'pen' ? 'pointer' : 'pen');
+      } else if (key === 'h' || key === 'H') {
+        selectTool(activeTool === 'highlighter' ? 'pointer' : 'highlighter');
+      } else if (key === 'a' || key === 'A') {
+        selectTool(activeTool === 'arrow' ? 'pointer' : 'arrow');
+      } else if (key === 'r' || key === 'R') {
+        selectTool(activeTool === 'rect' ? 'pointer' : 'rect');
+      } else if (key === 'e' || key === 'E') {
+        selectTool(activeTool === 'eraser' ? 'pointer' : 'eraser');
+      } else if (key === 'v' || key === 'V') {
+        selectTool('pointer');
+      } else if (key === 'c' || key === 'C') {
+        handleClearSlideAnnotations();
       } else if (key === '?') {
         setHelpOpen((v) => !v);
       }
     },
-    [blackout, currentIndex, goTo, gridOpen, helpOpen, onExit, slides.length, step, toggleFullscreen]
+    [
+      activeTool,
+      blackout,
+      currentIndex,
+      goTo,
+      gridOpen,
+      handleClearSlideAnnotations,
+      helpOpen,
+      onExit,
+      selectTool,
+      slides.length,
+      step,
+      toggleFullscreen,
+    ]
   );
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        handleUndoAnnotation();
+        return;
+      }
       if (['ArrowRight', 'ArrowLeft', ' ', 'PageDown', 'PageUp', 'Home', 'End'].includes(e.key)) {
         e.preventDefault();
       }
@@ -157,13 +299,15 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [handleKeyAction]);
+  }, [handleKeyAction, handleUndoAnnotation]);
 
   const handleTouchStart = (e: React.TouchEvent) => {
+    if (activeTool !== 'pointer') return;
     touchStartXRef.current = e.changedTouches[0]?.screenX ?? null;
   };
 
   const handleTouchEnd = (e: React.TouchEvent) => {
+    if (activeTool !== 'pointer') return;
     if (touchStartXRef.current === null) return;
     const dx = (e.changedTouches[0]?.screenX ?? 0) - touchStartXRef.current;
     touchStartXRef.current = null;
@@ -173,6 +317,21 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
       bumpControls();
     }
   };
+
+  const annotationOverlay = (
+    <PresentationAnnotationLayer
+      tool={activeTool}
+      color={strokeColor}
+      strokeSize={strokeSize}
+      annotations={currentAnnotations}
+      onCommitStroke={handleCommitStroke}
+      onEraseStrokeIds={handleEraseStrokeIds}
+      onUserActivity={bumpControls}
+    />
+  );
+
+  const isDrawingToolActive = activeTool !== 'pointer' && activeTool !== 'laser';
+  const showAnnotationTray = activeTool !== 'pointer';
 
   const progressPct = ((currentIndex + 1) / slides.length) * 100;
 
@@ -217,6 +376,7 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
                 customResources={deck.customResources}
                 sharedCss={deck.sharedCss}
                 aspectRatio={deck.aspectRatio}
+                overlay={annotationOverlay}
                 onForwardKey={(key) => handleKeyAction(key)}
               />
             </div>
@@ -316,6 +476,7 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
             customResources={deck.customResources}
             sharedCss={deck.sharedCss}
             aspectRatio={deck.aspectRatio}
+            overlay={annotationOverlay}
             onForwardKey={(key) => handleKeyAction(key)}
           />
           {blackout && (
@@ -329,12 +490,154 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
         </div>
       )}
 
-      {/* Floating Accessible Control Bar */}
+      {/* Floating Accessible Control Bar & Annotation Palette */}
       <div
-        className={`fixed bottom-4 left-1/2 -translate-x-1/2 z-30 transition-opacity duration-200 ${
+        onMouseEnter={() => {
+          dockHoveredRef.current = true;
+          setControlsVisible(true);
+        }}
+        onMouseLeave={() => {
+          dockHoveredRef.current = false;
+          bumpControls();
+        }}
+        className={`fixed bottom-4 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-2 max-w-[96vw] transition-opacity duration-200 ${
           controlsVisible || presenterView ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
       >
+        {/* Contextual Drawing & Laser Toolbar (shown while annotating or pointing) */}
+        {showAnnotationTray && (
+          <div
+            role="toolbar"
+            aria-label="Drawing and laser tools"
+            className="flex flex-wrap items-center justify-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-900/95 border border-slate-700/80 backdrop-blur-md shadow-xl"
+          >
+            {(
+              [
+                { id: 'pointer', icon: MousePointer2, label: 'Pointer (V / Esc)' },
+                { id: 'laser', icon: Radio, label: 'Laser Pointer (L)' },
+                { id: 'pen', icon: Pen, label: 'Pen (P)' },
+                { id: 'highlighter', icon: Highlighter, label: 'Highlighter (H)' },
+                { id: 'arrow', icon: ArrowUpRight, label: 'Arrow (A, hold Shift to snap)' },
+                { id: 'rect', icon: Square, label: 'Box / Rectangle (R, hold Shift for square)' },
+                { id: 'eraser', icon: Eraser, label: 'Stroke Eraser (E)' },
+              ] as const
+            ).map(({ id, icon: Icon, label }) => {
+              const isSelected = activeTool === id;
+              const activeStyle =
+                id === 'laser'
+                  ? 'bg-red-600 text-white'
+                  : 'bg-blue-600 text-white';
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => selectTool(id)}
+                  aria-label={label}
+                  aria-pressed={isSelected}
+                  title={label}
+                  className={`w-8 h-8 inline-flex items-center justify-center rounded-lg transition-colors cursor-pointer shrink-0 ${
+                    isSelected
+                      ? activeStyle
+                      : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                  }`}
+                >
+                  <Icon className="w-4 h-4" />
+                </button>
+              );
+            })}
+
+            {activeTool !== 'eraser' && (
+              <>
+                <span className="w-px h-5 bg-slate-700 mx-1" aria-hidden="true" />
+                <div className="flex items-center gap-1.5 px-1" role="group" aria-label="Ink color">
+                  {ANNOTATION_COLORS.map((swatch) => {
+                    const isColorActive = strokeColor === swatch.value;
+                    // For laser mode, hide charcoal/white since laser needs vivid glow colors
+                    if (
+                      activeTool === 'laser' &&
+                      (swatch.id === 'ink' || swatch.id === 'white')
+                    ) {
+                      return null;
+                    }
+                    return (
+                      <button
+                        key={swatch.id}
+                        type="button"
+                        onClick={() => setStrokeColor(swatch.value)}
+                        aria-label={swatch.label}
+                        aria-pressed={isColorActive}
+                        title={swatch.label}
+                        className={`w-5 h-5 rounded-full border border-white/25 transition-transform cursor-pointer shrink-0 ${
+                          isColorActive
+                            ? 'scale-110 ring-2 ring-white ring-offset-2 ring-offset-slate-900'
+                            : 'hover:scale-110'
+                        }`}
+                        style={{ backgroundColor: swatch.value }}
+                      />
+                    );
+                  })}
+                </div>
+              </>
+            )}
+
+            {isDrawingToolActive && activeTool !== 'eraser' && (
+              <>
+                <span className="w-px h-5 bg-slate-700 mx-1" aria-hidden="true" />
+                <div className="flex items-center gap-0.5" role="group" aria-label="Stroke width">
+                  {ANNOTATION_SIZES.map((sz) => {
+                    const isActive = strokeSize === sz.value;
+                    const dotPx = sz.id === 'sm' ? 4 : sz.id === 'md' ? 7 : 10;
+                    return (
+                      <button
+                        key={sz.id}
+                        type="button"
+                        onClick={() => setStrokeSize(sz.value)}
+                        aria-label={`${sz.label} stroke`}
+                        aria-pressed={isActive}
+                        title={`${sz.label} stroke`}
+                        className={`w-7 h-7 inline-flex items-center justify-center rounded-md transition-colors cursor-pointer ${
+                          isActive
+                            ? 'bg-slate-700 text-white'
+                            : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                        }`}
+                      >
+                        <span
+                          className="rounded-full bg-current block"
+                          style={{ width: `${dotPx}px`, height: `${dotPx}px` }}
+                        />
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+
+            <span className="w-px h-5 bg-slate-700 mx-1" aria-hidden="true" />
+
+            <button
+              type="button"
+              onClick={handleUndoAnnotation}
+              disabled={!canUndoAnnotation}
+              className="w-8 h-8 inline-flex items-center justify-center rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white disabled:opacity-35 disabled:pointer-events-none cursor-pointer shrink-0"
+              aria-label="Undo drawing (Ctrl+Z)"
+              title="Undo Drawing (Ctrl/Cmd+Z)"
+            >
+              <Undo2 className="w-4 h-4" />
+            </button>
+
+            <button
+              type="button"
+              onClick={handleClearSlideAnnotations}
+              disabled={currentAnnotations.length === 0}
+              className="w-8 h-8 inline-flex items-center justify-center rounded-lg text-slate-300 hover:bg-red-950/70 hover:text-red-300 disabled:opacity-35 disabled:pointer-events-none cursor-pointer shrink-0"
+              aria-label="Clear drawings on this slide (C)"
+              title="Clear Slide Drawings (C)"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
         <nav
           aria-label="Presentation controls"
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/92 border border-slate-700/70 backdrop-blur-md shadow-xl"
@@ -361,6 +664,40 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
             aria-label="Next slide"
           >
             <ChevronRight className="w-5 h-5" />
+          </button>
+
+          <span className="w-px h-5 bg-slate-700 mx-1" aria-hidden="true" />
+
+          {/* Laser Pointer Quick Toggle */}
+          <button
+            type="button"
+            onClick={() => selectTool(activeTool === 'laser' ? 'pointer' : 'laser')}
+            className={`w-10 h-10 inline-flex items-center justify-center rounded-lg transition-colors cursor-pointer ${
+              activeTool === 'laser'
+                ? 'bg-red-600 text-white'
+                : 'text-slate-300 hover:bg-slate-800'
+            }`}
+            aria-label="Toggle laser pointer (L)"
+            aria-pressed={activeTool === 'laser'}
+            title="Laser Pointer (L)"
+          >
+            <Radio className="w-4 h-4" />
+          </button>
+
+          {/* Drawing Tools Quick Toggle */}
+          <button
+            type="button"
+            onClick={() => selectTool(isDrawingToolActive ? 'pointer' : lastDrawTool)}
+            className={`w-10 h-10 inline-flex items-center justify-center rounded-lg transition-colors cursor-pointer ${
+              isDrawingToolActive
+                ? 'bg-blue-600 text-white'
+                : 'text-slate-300 hover:bg-slate-800'
+            }`}
+            aria-label="Toggle drawing tools (P)"
+            aria-pressed={isDrawingToolActive}
+            title="Draw & Annotate (P)"
+          >
+            <Pen className="w-4 h-4" />
           </button>
 
           <span className="w-px h-5 bg-slate-700 mx-1" aria-hidden="true" />
@@ -524,20 +861,24 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <dl className="divide-y divide-slate-800 text-sm">
+            <dl className="divide-y divide-slate-800 text-sm max-h-[65vh] overflow-y-auto pr-1">
               {[
-                ['Next slide', 'Right Arrow / Space'],
-                ['Previous slide', 'Left Arrow'],
+                ['Next / Previous slide', 'Right / Left Arrow'],
                 ['First / Last slide', 'Home / End'],
+                ['Laser Pointer', 'L'],
+                ['Pen / Highlighter', 'P / H'],
+                ['Arrow / Box', 'A / R (hold Shift to snap)'],
+                ['Stroke Eraser / Pointer', 'E / V'],
+                ['Undo / Clear slide ink', 'Ctrl+Z / C'],
                 ['Presenter Notes & Timer', 'N'],
                 ['Slide Grid Overview', 'G'],
                 ['Blackout Screen', 'B'],
                 ['Fullscreen', 'F'],
-                ['Exit Presentation', 'Esc'],
+                ['Exit tool / Presentation', 'Esc'],
               ].map(([action, keyLabel]) => (
-                <div key={action} className="py-2.5 flex items-center justify-between gap-4">
+                <div key={action} className="py-2 flex items-center justify-between gap-4">
                   <dt className="text-slate-300">{action}</dt>
-                  <dd className="font-mono text-xs text-slate-400">{keyLabel}</dd>
+                  <dd className="font-mono text-xs text-slate-400 text-right">{keyLabel}</dd>
                 </div>
               ))}
             </dl>
