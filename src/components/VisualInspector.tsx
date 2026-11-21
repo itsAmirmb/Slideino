@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useMemo, useRef } from 'react';
 import {
   AlignCenter,
   AlignJustify,
@@ -9,12 +9,15 @@ import {
   Copy,
   CornerLeftUp,
   Image as ImageIcon,
+  Italic,
   Layers,
   Minus,
   MousePointerClick,
   Square,
+  Strikethrough,
   Trash2,
   Type,
+  Underline,
   Upload,
   X,
 } from 'lucide-react';
@@ -27,12 +30,21 @@ import {
   SlideLayerItem,
   SlideTheme,
 } from '../types/slideino';
+import {
+  buildGoogleFontUrl,
+  extractPrimaryFontName,
+  findCatalogFont,
+  FONT_CATALOG,
+  FONT_CATEGORY_LABELS,
+  FontOption,
+} from '../data/fonts';
 
 interface VisualInspectorProps {
   editMode: boolean;
   slide: Slide;
   theme: SlideTheme;
   slideDir: 'ltr' | 'rtl';
+  availableFonts: string[];
   selectedElement: SelectedElementInfo | null;
   layers: SlideLayerItem[];
   onEnableEditMode: () => void;
@@ -53,6 +65,7 @@ export const VisualInspector: React.FC<VisualInspectorProps> = ({
   slide,
   theme,
   slideDir,
+  availableFonts,
   selectedElement,
   layers,
   onEnableEditMode,
@@ -69,6 +82,48 @@ export const VisualInspector: React.FC<VisualInspectorProps> = ({
       id: selectedElement.id,
       patch,
     });
+  };
+
+  // Build deduplicated list of fonts already present in this slide or active theme
+  const deckFonts = useMemo(() => {
+    const names = new Set<string>();
+    const addName = (raw: string) => {
+      const clean = extractPrimaryFontName(raw);
+      if (
+        clean &&
+        !['sans-serif', 'serif', 'monospace', 'system-ui', '-apple-system', 'cursive', 'fantasy', 'ui-sans-serif', 'ui-serif', 'ui-monospace'].includes(
+          clean.toLowerCase()
+        )
+      ) {
+        names.add(clean);
+      }
+    };
+    availableFonts.forEach(addName);
+    addName(theme.tokens.fontDisplay);
+    addName(theme.tokens.fontBody);
+    addName(theme.tokens.fontMono);
+    if (selectedElement?.fontFamily) {
+      addName(selectedElement.fontFamily);
+    }
+    return Array.from(names);
+  }, [availableFonts, theme.tokens, selectedElement?.fontFamily]);
+
+  const handleFontSelect = (fontName: string) => {
+    if (!fontName) return;
+    const catalogMatch = findCatalogFont(fontName);
+    const alreadyInSlide = availableFonts.some(
+      (f) => f.toLowerCase() === fontName.toLowerCase()
+    );
+    if (catalogMatch) {
+      patchSelected({
+        fontFamily: catalogMatch.family,
+        googleFontUrl: alreadyInSlide ? undefined : buildGoogleFontUrl(catalogMatch),
+      });
+    } else {
+      patchSelected({
+        fontFamily: `'${fontName}', sans-serif`,
+      });
+    }
   };
 
   const handleInsertImageFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -128,7 +183,23 @@ export const VisualInspector: React.FC<VisualInspectorProps> = ({
   // Selected Element Inspector
   if (selectedElement) {
     const isImage = selectedElement.tag === 'img';
-    const showTypography = selectedElement.kind === 'text' || selectedElement.isTextEditable;
+    const isNonTextGraphic = ['img', 'hr', 'svg', 'canvas', 'video', 'iframe'].includes(
+      selectedElement.tag
+    );
+    const showTypography =
+      !isNonTextGraphic &&
+      (selectedElement.kind === 'text' || selectedElement.isTextEditable || selectedElement.hasText);
+    const activePrimaryFont = extractPrimaryFontName(selectedElement.fontFamily);
+    const matchedDeckFont = deckFonts.find(
+      (f) => f.toLowerCase() === activePrimaryFont.toLowerCase()
+    );
+    const matchedCatalogFont = FONT_CATALOG.find(
+      (f) => f.name.toLowerCase() === activePrimaryFont.toLowerCase()
+    );
+    const resolvedFontValue =
+      matchedDeckFont || matchedCatalogFont?.name || activePrimaryFont || 'system-ui';
+    const hasCustomFallbackOption = !matchedDeckFont && !matchedCatalogFont;
+    const catalogCategories: FontOption['category'][] = ['sans', 'rtl', 'serif', 'mono'];
     const xLabel =
       selectedElement.positionMode === 'absolute' && selectedElement.horizontalAnchor === 'right'
         ? 'Right'
@@ -342,6 +413,52 @@ export const VisualInspector: React.FC<VisualInspectorProps> = ({
               Typography
             </span>
 
+            {/* Font Family */}
+            <div>
+              <label
+                htmlFor="inspector-font-family"
+                className="block text-[11px] text-slate-500 dark:text-slate-400 mb-1"
+              >
+                Font Family
+              </label>
+              <select
+                id="inspector-font-family"
+                value={resolvedFontValue}
+                onChange={(e) => handleFontSelect(e.target.value)}
+                className="w-full h-8 px-2 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-slate-100 cursor-pointer"
+              >
+                {hasCustomFallbackOption && (
+                  <option value={resolvedFontValue}>{resolvedFontValue} (Current)</option>
+                )}
+                {deckFonts.length > 0 && (
+                  <optgroup label="Slide &amp; Deck Fonts">
+                    {deckFonts.map((fontName) => (
+                      <option key={`deck-${fontName}`} value={fontName}>
+                        {fontName}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {catalogCategories.map((cat) => {
+                  const items = FONT_CATALOG.filter(
+                    (f) =>
+                      f.category === cat &&
+                      !deckFonts.some((d) => d.toLowerCase() === f.name.toLowerCase())
+                  );
+                  if (items.length === 0) return null;
+                  return (
+                    <optgroup key={cat} label={FONT_CATEGORY_LABELS[cat]}>
+                      {items.map((f) => (
+                        <option key={f.name} value={f.name}>
+                          {f.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  );
+                })}
+              </select>
+            </div>
+
             <div className="grid grid-cols-2 gap-2.5">
               <div>
                 <label
@@ -375,8 +492,9 @@ export const VisualInspector: React.FC<VisualInspectorProps> = ({
                   id="inspector-font-weight"
                   value={selectedElement.fontWeight}
                   onChange={(e) => patchSelected({ fontWeight: e.target.value })}
-                  className="w-full h-8 px-2 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-slate-100"
+                  className="w-full h-8 px-2 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-slate-100 cursor-pointer"
                 >
+                  <option value="300">Light (300)</option>
                   <option value="400">Regular (400)</option>
                   <option value="500">Medium (500)</option>
                   <option value="600">SemiBold (600)</option>
@@ -420,6 +538,74 @@ export const VisualInspector: React.FC<VisualInspectorProps> = ({
               </div>
 
               <div>
+                <span className="block text-[11px] text-slate-500 dark:text-slate-400 mb-1">
+                  Style
+                </span>
+                <div className="grid grid-cols-3 gap-0.5 p-0.5 rounded-lg bg-slate-100 dark:bg-slate-800">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      patchSelected({
+                        fontStyle: selectedElement.fontStyle === 'italic' ? 'normal' : 'italic',
+                      })
+                    }
+                    aria-label="Toggle italic"
+                    aria-pressed={selectedElement.fontStyle === 'italic'}
+                    title="Italic"
+                    className={`h-7 inline-flex items-center justify-center rounded-md transition-colors cursor-pointer ${
+                      selectedElement.fontStyle === 'italic'
+                        ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
+                        : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                    }`}
+                  >
+                    <Italic className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      patchSelected({
+                        textDecoration:
+                          selectedElement.textDecoration === 'underline' ? 'none' : 'underline',
+                      })
+                    }
+                    aria-label="Toggle underline"
+                    aria-pressed={selectedElement.textDecoration === 'underline'}
+                    title="Underline"
+                    className={`h-7 inline-flex items-center justify-center rounded-md transition-colors cursor-pointer ${
+                      selectedElement.textDecoration === 'underline'
+                        ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
+                        : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                    }`}
+                  >
+                    <Underline className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      patchSelected({
+                        textDecoration:
+                          selectedElement.textDecoration === 'line-through'
+                            ? 'none'
+                            : 'line-through',
+                      })
+                    }
+                    aria-label="Toggle strikethrough"
+                    aria-pressed={selectedElement.textDecoration === 'line-through'}
+                    title="Strikethrough"
+                    className={`h-7 inline-flex items-center justify-center rounded-md transition-colors cursor-pointer ${
+                      selectedElement.textDecoration === 'line-through'
+                        ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
+                        : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                    }`}
+                  >
+                    <Strikethrough className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2.5">
+              <div>
                 <label
                   htmlFor="inspector-line-height"
                   className="block text-[11px] text-slate-500 dark:text-slate-400 mb-1"
@@ -434,6 +620,25 @@ export const VisualInspector: React.FC<VisualInspectorProps> = ({
                   max={3}
                   value={selectedElement.lineHeight}
                   onChange={(e) => patchSelected({ lineHeight: e.target.value })}
+                  className="w-full h-8 px-2.5 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 font-mono text-xs tabular-nums text-slate-900 dark:text-slate-100"
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="inspector-letter-spacing"
+                  className="block text-[11px] text-slate-500 dark:text-slate-400 mb-1"
+                >
+                  Letter Spacing (px)
+                </label>
+                <input
+                  id="inspector-letter-spacing"
+                  type="number"
+                  step={0.5}
+                  min={-5}
+                  max={24}
+                  value={selectedElement.letterSpacing}
+                  onChange={(e) => patchSelected({ letterSpacing: e.target.value })}
                   className="w-full h-8 px-2.5 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 font-mono text-xs tabular-nums text-slate-900 dark:text-slate-100"
                 />
               </div>
@@ -668,7 +873,7 @@ export const VisualInspector: React.FC<VisualInspectorProps> = ({
             Insert Element
           </h3>
           <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">
-            Click any item on the slide to move, resize, or style it. Double-click text to edit inline.
+            Click an object to select it (blue border), then drag to move or resize. Double-click text to edit inline, or Ctrl/Cmd+Click to pick a nested element.
           </p>
         </div>
 

@@ -108,6 +108,7 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
   const [selectedElement, setSelectedElement] = useState<SelectedElementInfo | null>(null);
   const [layers, setLayers] = useState<SlideLayerItem[]>([]);
   const [slideDir, setSlideDir] = useState<'ltr' | 'rtl'>('ltr');
+  const [availableFonts, setAvailableFonts] = useState<string[]>([]);
   const [historyTick, setHistoryTick] = useState(0);
 
   const stageFrameRef = useRef<SlideFrameHandle>(null);
@@ -372,9 +373,10 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
   }, []);
 
   const handleLayersChange = useCallback(
-    (nextLayers: SlideLayerItem[], dir: 'ltr' | 'rtl') => {
+    (nextLayers: SlideLayerItem[], dir: 'ltr' | 'rtl', fonts: string[]) => {
       setLayers(nextLayers);
       setSlideDir(dir);
+      setAvailableFonts(fonts);
       if (!snapEnabled) {
         stageFrameRef.current?.sendCommand({ type: 'set-snap', enabled: false });
       }
@@ -938,8 +940,8 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
               <span className="hidden sm:inline whitespace-nowrap">
                 {editMode
                   ? selectedElement
-                    ? `Selected: ${selectedElement.tag}`
-                    : 'Click to select · Double-click text to edit'
+                    ? `Selected: ${selectedElement.tag} · Drag to move · Double-click text`
+                    : 'Click to select · Drag selected to move'
                   : activeTheme.name}
               </span>
             </div>
@@ -1019,6 +1021,7 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
                   slide={activeSlide}
                   theme={activeTheme}
                   slideDir={slideDir}
+                  availableFonts={availableFonts}
                   selectedElement={selectedElement}
                   layers={layers}
                   onEnableEditMode={() => setEditMode(true)}

@@ -137,6 +137,7 @@ export interface SelectedElementInfo {
   label: string;
   kind: 'text' | 'image' | 'shape' | 'container';
   hasParent: boolean;
+  hasText: boolean;
   isTextEditable: boolean;
   textContent: string;
   dir: 'ltr' | 'rtl' | '';
@@ -149,8 +150,11 @@ export interface SelectedElementInfo {
   height: number;
   zIndex: number;
   // Typography
+  fontFamily: string;
   fontSize: number;
   fontWeight: string;
+  fontStyle: 'normal' | 'italic';
+  textDecoration: 'none' | 'underline' | 'line-through';
   textAlign: 'left' | 'center' | 'right' | 'justify';
   color: string;
   lineHeight: string;
@@ -174,8 +178,12 @@ export interface ElementStylePatch {
   width?: number;
   height?: number;
   zIndex?: number;
+  fontFamily?: string;
+  googleFontUrl?: string;
   fontSize?: number;
   fontWeight?: string;
+  fontStyle?: 'normal' | 'italic';
+  textDecoration?: 'none' | 'underline' | 'line-through';
   textAlign?: 'left' | 'center' | 'right' | 'justify';
   color?: string;
   lineHeight?: string;

@@ -6,6 +6,7 @@ import {
 } from '../types/slideino';
 import { isValidHttpsUrl } from './storage';
 import { buildVisualEditorInjection } from './visualEditorScript';
+import { buildAutoGoogleFontsLink } from '../data/fonts';
 
 export interface BuildSlideOptions {
   slide: Slide;
@@ -363,6 +364,8 @@ export function buildSlideDocument(options: BuildSlideOptions): string {
   const isStandalone = Boolean(slide.standalone) || isFullDocument;
   const activeEditMode = Boolean(editMode && !isThumbnail);
 
+  const autoFontLink = buildAutoGoogleFontsLink(processedHtml, slide.css || '', sharedCss);
+
   const headTags = buildLibraryHeadTags(
     libraries,
     theme,
@@ -396,6 +399,7 @@ export function buildSlideDocument(options: BuildSlideOptions): string {
       .join('\n');
 
     const overrideSuffix = [
+      autoFontLink,
       headTags,
       `<style data-slideino-overrides="true">${escapeStyleClose(
         buildStandaloneOverrideCss(slide, prefersReducedMotion, isThumbnail)
@@ -445,6 +449,7 @@ export function buildSlideDocument(options: BuildSlideOptions): string {
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   ${sharedStyleTag}
+  ${autoFontLink}
   ${headTags}
   ${themeStyleTag}
 </head>

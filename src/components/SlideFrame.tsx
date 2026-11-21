@@ -37,7 +37,11 @@ interface SlideFrameProps {
   onForwardKey?: (key: string, shiftKey: boolean) => void;
   onVisualHtmlChange?: (html: string, commit: boolean) => void;
   onElementSelect?: (element: SelectedElementInfo | null) => void;
-  onLayersChange?: (layers: SlideLayerItem[], slideDir: 'ltr' | 'rtl') => void;
+  onLayersChange?: (
+    layers: SlideLayerItem[],
+    slideDir: 'ltr' | 'rtl',
+    availableFonts: string[]
+  ) => void;
   onEditorUndo?: () => void;
   onEditorRedo?: () => void;
   className?: string;
@@ -167,7 +171,10 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(
           Array.isArray(data.payload.layers)
         ) {
           const dir = data.payload.slideDir === 'rtl' ? 'rtl' : 'ltr';
-          onLayersChange(data.payload.layers, dir);
+          const fonts = Array.isArray(data.payload.availableFonts)
+            ? data.payload.availableFonts.filter((f: unknown): f is string => typeof f === 'string')
+            : [];
+          onLayersChange(data.payload.layers, dir, fonts);
         } else if (data.type === 'editor-undo' && onEditorUndo) {
           onEditorUndo();
         } else if (data.type === 'editor-redo' && onEditorRedo) {

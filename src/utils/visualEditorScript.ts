@@ -6,6 +6,47 @@ export function buildVisualEditorInjection(
   const fullDocFlag = isFullDocument ? 'true' : 'false';
 
   return `<style data-slideino-editor="true">
+html.__sl_edit_mode__,
+html.__sl_edit_mode__ * {
+  cursor: default !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+html.__sl_edit_mode__ [data-sl-hover="true"],
+html.__sl_edit_mode__ [data-sl-hover="true"] * {
+  cursor: pointer !important;
+}
+html.__sl_edit_mode__ [data-sl-selected="true"],
+html.__sl_edit_mode__ [data-sl-selected="true"] * {
+  cursor: move !important;
+}
+html.__sl_edit_mode__ [data-sl-editing="true"],
+html.__sl_edit_mode__ [data-sl-editing="true"] * {
+  outline: none !important;
+  cursor: text !important;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+html.__sl_dragging__,
+html.__sl_dragging__ * {
+  cursor: grabbing !important;
+}
+html[data-sl-resize-cursor="nwse-resize"],
+html[data-sl-resize-cursor="nwse-resize"] * {
+  cursor: nwse-resize !important;
+}
+html[data-sl-resize-cursor="nesw-resize"],
+html[data-sl-resize-cursor="nesw-resize"] * {
+  cursor: nesw-resize !important;
+}
+html[data-sl-resize-cursor="ns-resize"],
+html[data-sl-resize-cursor="ns-resize"] * {
+  cursor: ns-resize !important;
+}
+html[data-sl-resize-cursor="ew-resize"],
+html[data-sl-resize-cursor="ew-resize"] * {
+  cursor: ew-resize !important;
+}
 #__slideino_editor_overlay__ {
   position: fixed;
   inset: 0;
@@ -17,10 +58,23 @@ export function buildVisualEditorInjection(
 .__sl_hover_box__ {
   position: fixed;
   pointer-events: none;
-  border: 1.5px dashed rgba(37, 99, 235, 0.7);
+  border: 1.5px dashed rgba(37, 99, 235, 0.8);
   background: rgba(37, 99, 235, 0.04);
   box-sizing: border-box;
   display: none;
+}
+.__sl_hover_badge__ {
+  position: absolute;
+  top: -20px;
+  left: -1px;
+  background: rgba(15, 23, 42, 0.86);
+  color: #f8fafc;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
 }
 .__sl_sel_box__ {
   position: fixed;
@@ -65,14 +119,14 @@ export function buildVisualEditorInjection(
 .__sl_sel_box__.is-editing .__sl_handle__ {
   display: none;
 }
-.__sl_handle__[data-h="nw"] { top: -5px; left: -5px; cursor: nwse-resize; }
-.__sl_handle__[data-h="n"]  { top: -5px; left: calc(50% - 5px); cursor: ns-resize; }
-.__sl_handle__[data-h="ne"] { top: -5px; right: -5px; cursor: nesw-resize; }
-.__sl_handle__[data-h="e"]  { top: calc(50% - 5px); right: -5px; cursor: ew-resize; }
-.__sl_handle__[data-h="se"] { bottom: -5px; right: -5px; cursor: nwse-resize; }
-.__sl_handle__[data-h="s"]  { bottom: -5px; left: calc(50% - 5px); cursor: ns-resize; }
-.__sl_handle__[data-h="sw"] { bottom: -5px; left: -5px; cursor: nesw-resize; }
-.__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: -5px; cursor: ew-resize; }
+html.__sl_edit_mode__ .__sl_handle__[data-h="nw"] { top: -5px; left: -5px; cursor: nwse-resize !important; }
+html.__sl_edit_mode__ .__sl_handle__[data-h="n"]  { top: -5px; left: calc(50% - 5px); cursor: ns-resize !important; }
+html.__sl_edit_mode__ .__sl_handle__[data-h="ne"] { top: -5px; right: -5px; cursor: nesw-resize !important; }
+html.__sl_edit_mode__ .__sl_handle__[data-h="e"]  { top: calc(50% - 5px); right: -5px; cursor: ew-resize !important; }
+html.__sl_edit_mode__ .__sl_handle__[data-h="se"] { bottom: -5px; right: -5px; cursor: nwse-resize !important; }
+html.__sl_edit_mode__ .__sl_handle__[data-h="s"]  { bottom: -5px; left: calc(50% - 5px); cursor: ns-resize !important; }
+html.__sl_edit_mode__ .__sl_handle__[data-h="sw"] { bottom: -5px; left: -5px; cursor: nesw-resize !important; }
+html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: -5px; cursor: ew-resize !important; }
 .__sl_guide_v__ {
   position: fixed;
   top: 0;
@@ -91,12 +145,6 @@ export function buildVisualEditorInjection(
   pointer-events: none;
   display: none;
 }
-[data-sl-editing="true"] {
-  outline: none !important;
-  cursor: text !important;
-  user-select: text !important;
-  -webkit-user-select: text !important;
-}
 </style>
 <script data-slideino-editor="true">
 (function() {
@@ -111,6 +159,7 @@ export function buildVisualEditorInjection(
   var resizeState = null;
   var overlayRoot = null;
   var hoverBox = null;
+  var hoverBadge = null;
   var selBox = null;
   var selBadge = null;
   var guideV = null;
@@ -304,6 +353,13 @@ export function buildVisualEditorInjection(
 
     var parentCandidate = el.parentElement;
     var hasParent = Boolean(parentCandidate && !isCanvasShell(parentCandidate) && !isEditorNode(parentCandidate));
+    var hasText = (el.textContent || '').trim().length > 0;
+    var rawDeco = (cs.textDecorationLine || cs.textDecoration || 'none').toLowerCase();
+    var textDeco = rawDeco.indexOf('underline') !== -1
+      ? 'underline'
+      : rawDeco.indexOf('line-through') !== -1
+      ? 'line-through'
+      : 'none';
 
     var info = {
       id: id,
@@ -311,6 +367,7 @@ export function buildVisualEditorInjection(
       label: getElementLabel(el),
       kind: kind,
       hasParent: hasParent,
+      hasText: hasText,
       isTextEditable: canEditTextDirectly(el) && hasSimpleDirectText(el),
       textContent: hasSimpleDirectText(el) ? (el.innerText || el.textContent || '').trim() : '',
       dir: el.getAttribute('dir') || '',
@@ -321,12 +378,15 @@ export function buildVisualEditorInjection(
       width: Math.round(rect.width),
       height: Math.round(rect.height),
       zIndex: zVal,
+      fontFamily: cs.fontFamily || 'sans-serif',
       fontSize: Math.round(parseFloat(cs.fontSize) || 16),
       fontWeight: String(cs.fontWeight || '400'),
+      fontStyle: cs.fontStyle === 'italic' || cs.fontStyle === 'oblique' ? 'italic' : 'normal',
+      textDecoration: textDeco,
       textAlign: align,
       color: rgbToHex(cs.color),
       lineHeight: cs.lineHeight === 'normal' ? '1.4' : (Math.round((parseFloat(cs.lineHeight) / Math.max(1, parseFloat(cs.fontSize) || 16)) * 100) / 100).toString(),
-      letterSpacing: cs.letterSpacing === 'normal' ? '0' : cs.letterSpacing,
+      letterSpacing: cs.letterSpacing === 'normal' ? '0' : String(Math.round((parseFloat(cs.letterSpacing) || 0) * 10) / 10),
       backgroundColor: rgbToHex(cs.backgroundColor),
       borderRadius: Math.round(parseFloat(cs.borderRadius) || 0),
       opacity: Math.round((parseFloat(cs.opacity) || 1) * 100),
@@ -340,6 +400,40 @@ export function buildVisualEditorInjection(
     }
 
     return info;
+  }
+
+  function collectAvailableFonts() {
+    var fontSet = new Set();
+    try {
+      if (document.fonts && typeof document.fonts.forEach === 'function') {
+        document.fonts.forEach(function(face) {
+          if (face && face.family) {
+            var clean = face.family.replace(/^['"]+|['"]+$/g, '').trim();
+            if (clean && clean.indexOf('Font Awesome') === -1 && clean.indexOf('KaTeX') === -1) {
+              fontSet.add(clean);
+            }
+          }
+        });
+      }
+    } catch (_) {}
+
+    try {
+      var styles = document.querySelectorAll('style');
+      for (var i = 0; i < styles.length; i++) {
+        if (styles[i].getAttribute('data-slideino-editor') === 'true') continue;
+        var text = styles[i].textContent || '';
+        var m;
+        var re = /@font-face\\s*\\{[^}]*font-family\\s*:\\s*['"]?([^'";}]+)['"]?/gi;
+        while ((m = re.exec(text)) !== null) {
+          var name = m[1].trim();
+          if (name && name.indexOf('Font Awesome') === -1 && name.indexOf('KaTeX') === -1) {
+            fontSet.add(name);
+          }
+        }
+      }
+    } catch (_) {}
+
+    return Array.from(fontSet).slice(0, 24);
   }
 
   function collectLayers() {
@@ -389,7 +483,27 @@ export function buildVisualEditorInjection(
   function emitLayers() {
     postHost('layers-change', {
       layers: collectLayers(),
-      slideDir: (document.documentElement.getAttribute('dir') || window.getComputedStyle(document.body).direction || 'ltr').toLowerCase()
+      slideDir: (document.documentElement.getAttribute('dir') || window.getComputedStyle(document.body).direction || 'ltr').toLowerCase(),
+      availableFonts: collectAvailableFonts()
+    });
+  }
+
+  function stripEditorAttrs(root) {
+    if (root.classList) {
+      root.classList.remove('__sl_edit_mode__', '__sl_dragging__');
+      if (root.className === '') root.removeAttribute('class');
+    }
+    root.removeAttribute('data-sl-resize-cursor');
+    root.querySelectorAll('[data-sl-id], [data-sl-editing], [data-sl-ce], [data-sl-selected], [data-sl-hover]').forEach(function(n) {
+      n.removeAttribute('data-sl-id');
+      n.removeAttribute('data-sl-editing');
+      n.removeAttribute('data-sl-selected');
+      n.removeAttribute('data-sl-hover');
+      if (n.hasAttribute('data-sl-ce')) {
+        n.removeAttribute('contenteditable');
+        n.removeAttribute('spellcheck');
+        n.removeAttribute('data-sl-ce');
+      }
     });
   }
 
@@ -397,33 +511,17 @@ export function buildVisualEditorInjection(
     if (IS_FULL_DOC) {
       var docClone = document.documentElement.cloneNode(true);
       docClone.querySelectorAll(
-        '[data-slideino-editor="true"], [data-slideino-tokens="true"], [data-slideino-shared="true"], [data-slideino-overrides="true"], [data-slideino-theme="true"], [data-slideino-runtime="true"], #__slideino_editor_overlay__'
+        '[data-slideino-editor="true"], [data-slideino-autofont="true"], [data-slideino-tokens="true"], [data-slideino-shared="true"], [data-slideino-overrides="true"], [data-slideino-theme="true"], [data-slideino-runtime="true"], #__slideino_editor_overlay__'
       ).forEach(function(n) { n.remove(); });
-      docClone.querySelectorAll('[data-sl-id], [data-sl-editing], [data-sl-ce]').forEach(function(n) {
-        n.removeAttribute('data-sl-id');
-        n.removeAttribute('data-sl-editing');
-        if (n.hasAttribute('data-sl-ce')) {
-          n.removeAttribute('contenteditable');
-          n.removeAttribute('spellcheck');
-          n.removeAttribute('data-sl-ce');
-        }
-      });
+      stripEditorAttrs(docClone);
       return '<!doctype html>\\n' + docClone.outerHTML;
     }
 
     var bodyClone = document.body.cloneNode(true);
     bodyClone.querySelectorAll(
-      '[data-slideino-editor="true"], [data-slideino-runtime="true"], #__slideino_editor_overlay__'
+      '[data-slideino-editor="true"], [data-slideino-autofont="true"], [data-slideino-runtime="true"], #__slideino_editor_overlay__'
     ).forEach(function(n) { n.remove(); });
-    bodyClone.querySelectorAll('[data-sl-id], [data-sl-editing], [data-sl-ce]').forEach(function(n) {
-      n.removeAttribute('data-sl-id');
-      n.removeAttribute('data-sl-editing');
-      if (n.hasAttribute('data-sl-ce')) {
-        n.removeAttribute('contenteditable');
-        n.removeAttribute('spellcheck');
-        n.removeAttribute('data-sl-ce');
-      }
-    });
+    stripEditorAttrs(bodyClone);
     return bodyClone.innerHTML.trim();
   }
 
@@ -441,16 +539,32 @@ export function buildVisualEditorInjection(
     }
   }
 
+  function setHoveredElement(el) {
+    if (hoveredEl === el) return;
+    if (hoveredEl && document.contains(hoveredEl)) {
+      hoveredEl.removeAttribute('data-sl-hover');
+    }
+    hoveredEl = el && el !== selectedEl && document.contains(el) ? el : null;
+    if (hoveredEl) {
+      hoveredEl.setAttribute('data-sl-hover', 'true');
+    }
+    updateOverlayBoxes();
+  }
+
   function updateOverlayBoxes() {
     if (!selBox || !hoverBox) return;
 
-    if (hoveredEl && hoveredEl !== selectedEl && document.contains(hoveredEl)) {
+    if (hoveredEl && hoveredEl !== selectedEl && !dragState && !resizeState && document.contains(hoveredEl)) {
       var hr = hoveredEl.getBoundingClientRect();
       hoverBox.style.display = 'block';
       hoverBox.style.left = hr.left + 'px';
       hoverBox.style.top = hr.top + 'px';
       hoverBox.style.width = Math.max(2, hr.width) + 'px';
       hoverBox.style.height = Math.max(2, hr.height) + 'px';
+      if (hoverBadge) {
+        hoverBadge.textContent = hoveredEl.tagName.toLowerCase() + ' · Click to select';
+        hoverBadge.style.top = hr.top < 24 ? (Math.max(2, hr.height) + 4) + 'px' : '-20px';
+      }
     } else {
       hoverBox.style.display = 'none';
     }
@@ -519,7 +633,17 @@ export function buildVisualEditorInjection(
     if (editingEl && editingEl !== el) {
       stopInlineEditing(true);
     }
+    if (selectedEl && document.contains(selectedEl)) {
+      selectedEl.removeAttribute('data-sl-selected');
+    }
     selectedEl = el && document.contains(el) ? el : null;
+    if (selectedEl) {
+      selectedEl.setAttribute('data-sl-selected', 'true');
+      if (hoveredEl === selectedEl) {
+        hoveredEl.removeAttribute('data-sl-hover');
+        hoveredEl = null;
+      }
+    }
     updateOverlayBoxes();
     postHost('element-select', {
       element: selectedEl ? buildElementInfo(selectedEl) : null
@@ -556,13 +680,24 @@ export function buildVisualEditorInjection(
     return { xs: xs, ys: ys };
   }
 
+  function getResizeCursorForHandle(dir) {
+    if (dir === 'nw' || dir === 'se') return 'nwse-resize';
+    if (dir === 'ne' || dir === 'sw') return 'nesw-resize';
+    if (dir === 'n' || dir === 's') return 'ns-resize';
+    return 'ew-resize';
+  }
+
   function mountOverlay() {
+    document.documentElement.classList.add('__sl_edit_mode__');
     overlayRoot = document.createElement('div');
     overlayRoot.id = '__slideino_editor_overlay__';
     overlayRoot.setAttribute('data-slideino-editor', 'true');
 
     hoverBox = document.createElement('div');
     hoverBox.className = '__sl_hover_box__';
+    hoverBadge = document.createElement('div');
+    hoverBadge.className = '__sl_hover_badge__';
+    hoverBox.appendChild(hoverBadge);
 
     selBox = document.createElement('div');
     selBox.className = '__sl_sel_box__';
@@ -584,6 +719,7 @@ export function buildVisualEditorInjection(
         var rootRect = getCanvasRoot().getBoundingClientRect();
         var posMode = cs.position;
         var anchor = getHorizontalAnchor(selectedEl);
+        document.documentElement.setAttribute('data-sl-resize-cursor', getResizeCursorForHandle(dir));
         resizeState = {
           handle: dir,
           startX: e.clientX,
@@ -617,6 +753,19 @@ export function buildVisualEditorInjection(
     overlayRoot.appendChild(guideV);
     overlayRoot.appendChild(guideH);
     document.documentElement.appendChild(overlayRoot);
+  }
+
+  function ensureLiveGoogleFont(url) {
+    if (!url || !document.head) return;
+    var existing = document.head.querySelectorAll('link[rel="stylesheet"]');
+    for (var i = 0; i < existing.length; i++) {
+      if (existing[i].getAttribute('href') === url) return;
+    }
+    var link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = url;
+    link.setAttribute('data-slideino-editor', 'true');
+    document.head.appendChild(link);
   }
 
   function applyPatchToElement(el, patch) {
@@ -658,11 +807,23 @@ export function buildVisualEditorInjection(
       if (getOverlayPositionMode(el) === 'static') el.style.position = 'relative';
       el.style.zIndex = String(Math.round(patch.zIndex));
     }
+    if (typeof patch.googleFontUrl === 'string' && patch.googleFontUrl) {
+      ensureLiveGoogleFont(patch.googleFontUrl);
+    }
+    if (typeof patch.fontFamily === 'string') {
+      el.style.fontFamily = patch.fontFamily;
+    }
     if (typeof patch.fontSize === 'number' && Number.isFinite(patch.fontSize)) {
       el.style.fontSize = Math.max(8, Math.min(240, Math.round(patch.fontSize))) + 'px';
     }
     if (typeof patch.fontWeight === 'string') {
       el.style.fontWeight = patch.fontWeight;
+    }
+    if (typeof patch.fontStyle === 'string') {
+      el.style.fontStyle = patch.fontStyle;
+    }
+    if (typeof patch.textDecoration === 'string') {
+      el.style.textDecoration = patch.textDecoration;
     }
     if (typeof patch.textAlign === 'string') {
       el.style.textAlign = patch.textAlign;
@@ -674,7 +835,14 @@ export function buildVisualEditorInjection(
       el.style.lineHeight = patch.lineHeight;
     }
     if (typeof patch.letterSpacing === 'string') {
-      el.style.letterSpacing = patch.letterSpacing;
+      var trimmedLs = patch.letterSpacing.trim();
+      if (trimmedLs === '' || trimmedLs === '0') {
+        el.style.letterSpacing = 'normal';
+      } else if (/^-?\\d+(\\.\\d+)?$/.test(trimmedLs)) {
+        el.style.letterSpacing = trimmedLs + 'px';
+      } else {
+        el.style.letterSpacing = trimmedLs;
+      }
     }
     if (typeof patch.backgroundColor === 'string') {
       el.style.backgroundColor = patch.backgroundColor === 'transparent' ? 'transparent' : patch.backgroundColor;
@@ -859,8 +1027,12 @@ export function buildVisualEditorInjection(
       if (dragState && selectedEl) {
         var moveDx = e.clientX - dragState.startX;
         var moveDy = e.clientY - dragState.startY;
-        if (!dragState.active && Math.hypot(moveDx, moveDy) < 3) return;
-        dragState.active = true;
+        if (!dragState.active && Math.hypot(moveDx, moveDy) < 4) return;
+        if (!dragState.active) {
+          dragState.active = true;
+          document.documentElement.classList.add('__sl_dragging__');
+          setHoveredElement(null);
+        }
         e.preventDefault();
 
         var appliedDx = moveDx;
@@ -927,12 +1099,22 @@ export function buildVisualEditorInjection(
       }
 
       if (editingEl) return;
-      var candidate = resolveClickableTarget(e.target, false);
-      if (candidate !== hoveredEl) {
-        hoveredEl = candidate;
-        updateOverlayBoxes();
+      // When hovering inside the already-selected element, keep move cursor without showing hover box
+      if (selectedEl && document.contains(selectedEl) && selectedEl.contains(e.target) && !(e.metaKey || e.ctrlKey)) {
+        setHoveredElement(null);
+        return;
       }
+      var candidate = (e.metaKey || e.ctrlKey)
+        ? (!isEditorNode(e.target) && !isCanvasShell(e.target) ? e.target : null)
+        : resolveClickableTarget(e.target, false);
+      setHoveredElement(candidate);
     }, true);
+
+    document.addEventListener('pointerleave', function() {
+      if (!dragState && !resizeState) {
+        setHoveredElement(null);
+      }
+    });
 
     document.addEventListener('pointerdown', function(e) {
       if (e.button !== 0) return;
@@ -943,57 +1125,68 @@ export function buildVisualEditorInjection(
         stopInlineEditing(true);
       }
 
-      var target = resolveClickableTarget(e.target, true);
-      if (!target) {
-        selectElement(null);
-        return;
-      }
-
       // Prevent links/buttons from navigating while editing
       if (e.target.closest && e.target.closest('a, button')) {
         e.preventDefault();
       }
 
+      var deepSelect = Boolean(e.metaKey || e.ctrlKey);
+
+      // Step 2: If pressing down on an ALREADY selected element (blue border visible), prepare to move it.
+      if (!deepSelect && selectedEl && document.contains(selectedEl) && selectedEl.contains(e.target)) {
+        var cs = window.getComputedStyle(selectedEl);
+        var rect = selectedEl.getBoundingClientRect();
+        var rootRect = getCanvasRoot().getBoundingClientRect();
+        var posMode = cs.position;
+        var anchor = getHorizontalAnchor(selectedEl);
+
+        dragState = {
+          startX: e.clientX,
+          startY: e.clientY,
+          startRectLeft: rect.left,
+          startRectTop: rect.top,
+          startW: rect.width,
+          startH: rect.height,
+          startLeft: posMode === 'absolute' || posMode === 'fixed'
+            ? (Number.isFinite(parseFloat(selectedEl.style.left)) ? parseFloat(selectedEl.style.left) : rect.left - rootRect.left)
+            : (parseFloat(selectedEl.style.left) || 0),
+          startRight: posMode === 'absolute' || posMode === 'fixed'
+            ? (Number.isFinite(parseFloat(selectedEl.style.right)) ? parseFloat(selectedEl.style.right) : rootRect.right - rect.right)
+            : 0,
+          startTop: posMode === 'absolute' || posMode === 'fixed'
+            ? (Number.isFinite(parseFloat(selectedEl.style.top)) ? parseFloat(selectedEl.style.top) : rect.top - rootRect.top)
+            : (parseFloat(selectedEl.style.top) || 0),
+          posMode: posMode,
+          anchor: anchor,
+          snap: getSnapTargets(selectedEl),
+          active: false
+        };
+        return;
+      }
+
+      // Step 1: Clicking an UNSELECTED element ONLY selects it (shows blue border) — never drags on first click.
+      var target = deepSelect
+        ? (!isEditorNode(e.target) && !isCanvasShell(e.target) ? e.target : null)
+        : resolveClickableTarget(e.target, false);
+      dragState = null;
+      if (!target) {
+        selectElement(null);
+        return;
+      }
       selectElement(target);
-
-      var cs = window.getComputedStyle(target);
-      var rect = target.getBoundingClientRect();
-      var rootRect = getCanvasRoot().getBoundingClientRect();
-      var posMode = cs.position;
-      var anchor = getHorizontalAnchor(target);
-
-      dragState = {
-        startX: e.clientX,
-        startY: e.clientY,
-        startRectLeft: rect.left,
-        startRectTop: rect.top,
-        startW: rect.width,
-        startH: rect.height,
-        startLeft: posMode === 'absolute' || posMode === 'fixed'
-          ? (Number.isFinite(parseFloat(target.style.left)) ? parseFloat(target.style.left) : rect.left - rootRect.left)
-          : (parseFloat(target.style.left) || 0),
-        startRight: posMode === 'absolute' || posMode === 'fixed'
-          ? (Number.isFinite(parseFloat(target.style.right)) ? parseFloat(target.style.right) : rootRect.right - rect.right)
-          : 0,
-        startTop: posMode === 'absolute' || posMode === 'fixed'
-          ? (Number.isFinite(parseFloat(target.style.top)) ? parseFloat(target.style.top) : rect.top - rootRect.top)
-          : (parseFloat(target.style.top) || 0),
-        posMode: posMode,
-        anchor: anchor,
-        snap: getSnapTargets(target),
-        active: false
-      };
     }, true);
 
     window.addEventListener('pointerup', function() {
       if (resizeState) {
         var didResize = resizeState.changed;
         resizeState = null;
+        document.documentElement.removeAttribute('data-sl-resize-cursor');
         if (didResize) syncToHost(true);
       }
       if (dragState) {
         var didDrag = dragState.active;
         dragState = null;
+        document.documentElement.classList.remove('__sl_dragging__');
         hideGuides();
         if (didDrag) syncToHost(true);
       }
