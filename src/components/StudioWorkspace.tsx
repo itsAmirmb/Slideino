@@ -940,7 +940,7 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
               <span className="hidden sm:inline whitespace-nowrap">
                 {editMode
                   ? selectedElement
-                    ? `Selected: ${selectedElement.tag} · Drag to move · Double-click text`
+                    ? `Selected: ${selectedElement.friendlyName} · Drag to move · Double-click text`
                     : 'Click to select · Drag selected to move'
                   : activeTheme.name}
               </span>

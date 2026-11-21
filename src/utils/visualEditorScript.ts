@@ -119,6 +119,16 @@ html[data-sl-resize-cursor="ew-resize"] * {
 .__sl_sel_box__.is-editing .__sl_handle__ {
   display: none;
 }
+.__sl_sel_box__.is-compact .__sl_handle__[data-h="n"],
+.__sl_sel_box__.is-compact .__sl_handle__[data-h="s"],
+.__sl_sel_box__.is-compact .__sl_handle__[data-h="e"],
+.__sl_sel_box__.is-compact .__sl_handle__[data-h="w"] {
+  display: none;
+}
+.__sl_sel_box__.is-compact .__sl_handle__ {
+  width: 8px;
+  height: 8px;
+}
 html.__sl_edit_mode__ .__sl_handle__[data-h="nw"] { top: -5px; left: -5px; cursor: nwse-resize !important; }
 html.__sl_edit_mode__ .__sl_handle__[data-h="n"]  { top: -5px; left: calc(50% - 5px); cursor: ns-resize !important; }
 html.__sl_edit_mode__ .__sl_handle__[data-h="ne"] { top: -5px; right: -5px; cursor: nesw-resize !important; }
@@ -230,6 +240,31 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
     return 'container';
   }
 
+  function getFriendlyTagName(el) {
+    if (!el || !el.tagName) return 'Element';
+    var tag = el.tagName.toLowerCase();
+    var objType = (el.getAttribute('data-object-type') || '').toLowerCase();
+    if (objType === 'textbox') return 'Text Box';
+    if (objType === 'shape') return 'Shape';
+    if (/^h[1-6]$/.test(tag)) return 'Heading';
+    if (tag === 'p') return 'Paragraph';
+    if (tag === 'span' || tag === 'label' || tag === 'small' || tag === 'strong' || tag === 'em' || tag === 'mark') return 'Text';
+    if (tag === 'img' || tag === 'picture') return 'Image';
+    if (tag === 'svg') return 'Graphic';
+    if (tag === 'canvas') return 'Chart';
+    if (tag === 'ul' || tag === 'ol') return 'List';
+    if (tag === 'li') return 'List Item';
+    if (tag === 'button') return 'Button';
+    if (tag === 'a') return 'Link';
+    if (tag === 'hr') return 'Divider';
+    if (tag === 'blockquote') return 'Quote';
+    if (tag === 'table') return 'Table';
+    if (tag === 'div' || tag === 'section' || tag === 'article' || tag === 'header' || tag === 'footer') {
+      return el.children.length > 1 ? 'Group' : 'Box';
+    }
+    return tag.toUpperCase();
+  }
+
   function getElementLabel(el) {
     var tag = el.tagName.toLowerCase();
     var objType = (el.getAttribute('data-object-type') || '').toLowerCase();
@@ -244,7 +279,7 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
     if (objType === 'shape') return 'Shape';
     if (tag === 'svg') return 'SVG Graphic';
     if (tag === 'canvas') return 'Chart / Canvas';
-    return tag.toUpperCase();
+    return getFriendlyTagName(el);
   }
 
   function canEditTextDirectly(el) {
@@ -361,9 +396,31 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
       ? 'line-through'
       : 'none';
 
+    var directChildren = Array.from(el.children || [])
+      .filter(function(c) {
+        if (isEditorNode(c) || isCanvasShell(c)) return false;
+        var ct = c.tagName.toLowerCase();
+        if (ct === 'script' || ct === 'style' || ct === 'br') return false;
+        var cr = c.getBoundingClientRect();
+        return cr.width >= 2 || cr.height >= 2;
+      })
+      .slice(0, 24)
+      .map(function(c) {
+        var ccs = window.getComputedStyle(c);
+        var cz = parseInt(ccs.zIndex, 10);
+        return {
+          id: ensureUid(c),
+          tag: c.tagName.toLowerCase(),
+          label: getElementLabel(c),
+          kind: classifyElement(c),
+          zIndex: Number.isFinite(cz) ? cz : 0
+        };
+      });
+
     var info = {
       id: id,
       tag: el.tagName.toLowerCase(),
+      friendlyName: getFriendlyTagName(el),
       label: getElementLabel(el),
       kind: kind,
       hasParent: hasParent,
@@ -371,6 +428,7 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
       isTextEditable: canEditTextDirectly(el) && hasSimpleDirectText(el),
       textContent: hasSimpleDirectText(el) ? (el.innerText || el.textContent || '').trim() : '',
       dir: el.getAttribute('dir') || '',
+      children: directChildren,
       positionMode: posMode,
       horizontalAnchor: anchor,
       x: xVal,
@@ -562,7 +620,7 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
       hoverBox.style.width = Math.max(2, hr.width) + 'px';
       hoverBox.style.height = Math.max(2, hr.height) + 'px';
       if (hoverBadge) {
-        hoverBadge.textContent = hoveredEl.tagName.toLowerCase() + ' · Click to select';
+        hoverBadge.textContent = getFriendlyTagName(hoveredEl) + ' · Click to select';
         hoverBadge.style.top = hr.top < 24 ? (Math.max(2, hr.height) + 4) + 'px' : '-20px';
       }
     } else {
@@ -577,8 +635,9 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
       selBox.style.width = Math.max(4, sr.width) + 'px';
       selBox.style.height = Math.max(4, sr.height) + 'px';
       selBox.classList.toggle('is-editing', editingEl === selectedEl);
+      selBox.classList.toggle('is-compact', sr.width < 48 || sr.height < 32);
 
-      var badgeText = selectedEl.tagName.toLowerCase() + ' · ' + Math.round(sr.width) + '×' + Math.round(sr.height);
+      var badgeText = getFriendlyTagName(selectedEl) + ' · ' + Math.round(sr.width) + '×' + Math.round(sr.height);
       if (editingEl === selectedEl) {
         badgeText = 'Editing Text · Esc to finish';
       }
@@ -781,8 +840,8 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
       else el.removeAttribute('dir');
     }
     if (typeof patch.x === 'number' && Number.isFinite(patch.x)) {
-      if (posMode === 'static') {
-        el.style.position = 'relative';
+      if (posMode === 'static' || posMode === 'relative') {
+        ensureMovableInlineOrRelative(el);
         el.style.left = Math.round(patch.x) + 'px';
       } else if (posMode === 'absolute' || posMode === 'fixed') {
         if (anchor === 'right') el.style.right = Math.round(patch.x) + 'px';
@@ -792,15 +851,21 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
       }
     }
     if (typeof patch.y === 'number' && Number.isFinite(patch.y)) {
-      if (posMode === 'static') {
-        el.style.position = 'relative';
+      if (posMode === 'static' || posMode === 'relative') {
+        ensureMovableInlineOrRelative(el);
       }
       el.style.top = Math.round(patch.y) + 'px';
     }
     if (typeof patch.width === 'number' && Number.isFinite(patch.width) && patch.width >= 8) {
+      if (window.getComputedStyle(el).display === 'inline') {
+        el.style.display = 'inline-block';
+      }
       el.style.width = Math.round(patch.width) + 'px';
     }
     if (typeof patch.height === 'number' && Number.isFinite(patch.height) && patch.height >= 4) {
+      if (window.getComputedStyle(el).display === 'inline') {
+        el.style.display = 'inline-block';
+      }
       el.style.height = Math.round(patch.height) + 'px';
     }
     if (typeof patch.zIndex === 'number' && Number.isFinite(patch.zIndex)) {
@@ -963,6 +1028,61 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
     syncToHost(true);
   }
 
+  function ensureMovableInlineOrRelative(el) {
+    if (!el) return;
+    var cs = window.getComputedStyle(el);
+    if (cs.display === 'inline') {
+      el.style.display = 'inline-block';
+    }
+    if (cs.position === 'static') {
+      el.style.position = 'relative';
+    }
+    // Clear conflicting right/bottom so left/top always take effect in both LTR and RTL slides
+    if (cs.position === 'static' || cs.position === 'relative') {
+      el.style.right = 'auto';
+      el.style.bottom = 'auto';
+    }
+  }
+
+  function makeElementFreePosition(el) {
+    if (!el || isCanvasShell(el)) return;
+    var root = getCanvasRoot();
+    if (!root) return;
+    if (window.getComputedStyle(root).position === 'static') {
+      root.style.position = 'relative';
+    }
+    var rect = el.getBoundingClientRect();
+    var rootRect = root.getBoundingClientRect();
+    var cs = window.getComputedStyle(el);
+
+    // Preserve visual typography & appearance before lifting onto the canvas root
+    if (!el.style.fontFamily && cs.fontFamily) el.style.fontFamily = cs.fontFamily;
+    if (!el.style.fontSize && cs.fontSize) el.style.fontSize = cs.fontSize;
+    if (!el.style.fontWeight && cs.fontWeight) el.style.fontWeight = cs.fontWeight;
+    if (!el.style.color && cs.color) el.style.color = cs.color;
+    if (!el.style.lineHeight && cs.lineHeight && cs.lineHeight !== 'normal') el.style.lineHeight = cs.lineHeight;
+    if (!el.style.textAlign && cs.textAlign) el.style.textAlign = cs.textAlign;
+
+    el.setAttribute('data-object', 'true');
+    el.style.position = 'absolute';
+    el.style.display = cs.display === 'inline' ? 'inline-block' : cs.display;
+    el.style.left = Math.round(rect.left - rootRect.left) + 'px';
+    el.style.top = Math.round(rect.top - rootRect.top) + 'px';
+    el.style.right = 'auto';
+    el.style.bottom = 'auto';
+    el.style.margin = '0';
+    el.style.width = Math.max(16, Math.round(rect.width)) + 'px';
+    if (!el.style.zIndex || el.style.zIndex === 'auto') {
+      el.style.zIndex = '25';
+    }
+
+    if (el.parentElement !== root) {
+      root.appendChild(el);
+    }
+    selectElement(el);
+    syncToHost(true);
+  }
+
   function reorderZ(direction) {
     if (!selectedEl) return;
     if (getOverlayPositionMode(selectedEl) === 'static') {
@@ -978,6 +1098,11 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
   }
 
   function setupListeners() {
+    document.addEventListener('dragstart', function(e) {
+      if (!editingEl) {
+        e.preventDefault();
+      }
+    }, true);
     document.addEventListener('pointermove', function(e) {
       if (resizeState && selectedEl) {
         e.preventDefault();
@@ -1012,6 +1137,9 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
           }
         }
 
+        if (window.getComputedStyle(selectedEl).display === 'inline') {
+          selectedEl.style.display = 'inline-block';
+        }
         selectedEl.style.width = Math.round(newW) + 'px';
         selectedEl.style.height = Math.round(newH) + 'px';
         if (resizeState.posMode === 'absolute' || resizeState.posMode === 'fixed') {
@@ -1040,7 +1168,7 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
         var snappedV = null;
         var snappedH = null;
 
-        if (snapEnabled && !e.altKey && (dragState.posMode === 'absolute' || dragState.posMode === 'fixed')) {
+        if (snapEnabled && !e.altKey) {
           var threshold = 6;
           var targetLeft = dragState.startRectLeft + moveDx;
           var targetCenterX = targetLeft + dragState.startW / 2;
@@ -1089,7 +1217,7 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
           }
           selectedEl.style.top = Math.round(dragState.startTop + appliedDy) + 'px';
         } else {
-          if (dragState.posMode === 'static') selectedEl.style.position = 'relative';
+          ensureMovableInlineOrRelative(selectedEl);
           selectedEl.style.left = Math.round(dragState.startLeft + appliedDx) + 'px';
           selectedEl.style.top = Math.round(dragState.startTop + appliedDy) + 'px';
         }
@@ -1176,7 +1304,7 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
       selectElement(target);
     }, true);
 
-    window.addEventListener('pointerup', function() {
+    function finishPointerInteraction() {
       if (resizeState) {
         var didResize = resizeState.changed;
         resizeState = null;
@@ -1190,7 +1318,10 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
         hideGuides();
         if (didDrag) syncToHost(true);
       }
-    }, true);
+    }
+
+    window.addEventListener('pointerup', finishPointerInteraction, true);
+    window.addEventListener('pointercancel', finishPointerInteraction, true);
 
     document.addEventListener('dblclick', function(e) {
       if (isEditorNode(e.target)) return;
@@ -1275,7 +1406,9 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
         var anchor = getHorizontalAnchor(selectedEl);
         var rect = selectedEl.getBoundingClientRect();
         var rootRect = getCanvasRoot().getBoundingClientRect();
-        if (posMode === 'static') selectedEl.style.position = 'relative';
+        if (posMode === 'static' || posMode === 'relative') {
+          ensureMovableInlineOrRelative(selectedEl);
+        }
 
         var curLeft = posMode === 'absolute' || posMode === 'fixed'
           ? (Number.isFinite(parseFloat(selectedEl.style.left)) ? parseFloat(selectedEl.style.left) : rect.left - rootRect.left)
@@ -1332,6 +1465,9 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
         duplicateSelected();
       } else if (cmd.type === 'reorder-z') {
         reorderZ(cmd.direction);
+      } else if (cmd.type === 'make-absolute') {
+        var elToFree = cmd.id ? document.querySelector('[data-sl-id="' + cmd.id + '"]') : selectedEl;
+        if (elToFree) makeElementFreePosition(elToFree);
       } else if (cmd.type === 'insert-element') {
         insertNewElement(cmd.elementType, cmd.imgSrc, cmd.imgAlt);
       } else if (cmd.type === 'set-slide-dir') {

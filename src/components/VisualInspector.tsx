@@ -13,6 +13,7 @@ import {
   Layers,
   Minus,
   MousePointerClick,
+  Move,
   Square,
   Strikethrough,
   Trash2,
@@ -215,6 +216,10 @@ export const VisualInspector: React.FC<VisualInspectorProps> = ({
                 {selectedElement.label}
               </div>
               <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1.5 mt-0.5 font-mono">
+                <span className="font-sans font-medium text-slate-600 dark:text-slate-300">
+                  {selectedElement.friendlyName}
+                </span>
+                <span aria-hidden="true">·</span>
                 <span>&lt;{selectedElement.tag}&gt;</span>
                 <span aria-hidden="true">·</span>
                 <span className="tabular-nums">
@@ -283,6 +288,27 @@ export const VisualInspector: React.FC<VisualInspectorProps> = ({
               <Trash2 className="w-3.5 h-3.5" />
             </button>
           </div>
+
+          {selectedElement.children && selectedElement.children.length > 0 && (
+            <div className="pt-2 border-t border-slate-100 dark:border-slate-800/80 flex flex-col gap-1.5">
+              <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                Inside this {selectedElement.friendlyName.toLowerCase()} ({selectedElement.children.length})
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {selectedElement.children.slice(0, 8).map((child) => (
+                  <button
+                    key={child.id}
+                    type="button"
+                    onClick={() => onSendCommand({ type: 'select-element', id: child.id })}
+                    className="max-w-[160px] h-7 px-2 inline-flex items-center gap-1.5 rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 hover:border-blue-500 dark:hover:border-blue-500 text-[11px] text-slate-700 dark:text-slate-200 transition-colors cursor-pointer"
+                    title={`Select <${child.tag}>: ${child.label}`}
+                  >
+                    <span className="truncate">{child.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Direct Text Content Editor */}
@@ -768,9 +794,25 @@ export const VisualInspector: React.FC<VisualInspectorProps> = ({
 
         {/* Position & Size Controls */}
         <div className="p-4 flex flex-col gap-3">
-          <span className="text-xs font-medium text-slate-700 dark:text-slate-300">
-            Position &amp; Size
-          </span>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-medium text-slate-700 dark:text-slate-300">
+              Position &amp; Size
+            </span>
+            {(selectedElement.positionMode === 'static' ||
+              selectedElement.positionMode === 'relative') && (
+              <button
+                type="button"
+                onClick={() =>
+                  onSendCommand({ type: 'make-absolute', id: selectedElement.id })
+                }
+                className="h-7 px-2 inline-flex items-center gap-1 rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 hover:border-blue-500 dark:hover:border-blue-500 text-[11px] font-medium text-slate-700 dark:text-slate-200 transition-colors cursor-pointer whitespace-nowrap"
+                title="Detach from its parent box so you can move it freely anywhere on the slide"
+              >
+                <Move className="w-3 h-3" aria-hidden="true" />
+                <span>Free Move</span>
+              </button>
+            )}
+          </div>
           <div className="grid grid-cols-2 gap-2.5">
             <div>
               <label

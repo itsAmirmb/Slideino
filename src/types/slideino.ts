@@ -134,6 +134,7 @@ export interface SlideLayerItem {
 export interface SelectedElementInfo {
   id: string;
   tag: string;
+  friendlyName: string;
   label: string;
   kind: 'text' | 'image' | 'shape' | 'container';
   hasParent: boolean;
@@ -141,6 +142,7 @@ export interface SelectedElementInfo {
   isTextEditable: boolean;
   textContent: string;
   dir: 'ltr' | 'rtl' | '';
+  children: SlideLayerItem[];
   // Geometry (in slide canvas px)
   positionMode: 'absolute' | 'relative' | 'static' | 'fixed' | 'sticky';
   horizontalAnchor: 'left' | 'right';
@@ -204,6 +206,7 @@ export type EditorCommand =
   | { type: 'delete-selected' }
   | { type: 'duplicate-selected' }
   | { type: 'reorder-z'; direction: 'forward' | 'backward' | 'front' | 'back' }
+  | { type: 'make-absolute'; id?: string }
   | { type: 'insert-element'; elementType: InsertElementType; imgSrc?: string; imgAlt?: string }
   | { type: 'set-slide-dir'; dir: 'ltr' | 'rtl' }
   | { type: 'set-snap'; enabled: boolean }
