@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowDown,
   ArrowUp,
@@ -7,31 +7,44 @@ import {
   Code2,
   Copy,
   Download,
+  Eye,
   EyeOff,
   FileCode2,
+  Image as ImageIcon,
   Laptop,
+  Magnet,
+  Minus,
   Moon,
+  MousePointer2,
   PanelLeft,
   PanelRight,
   Plus,
+  Redo2,
   Search,
   Smartphone,
+  Square,
   Sun,
   Tablet,
   Trash2,
+  Type,
+  Undo2,
   Upload,
 } from 'lucide-react';
 import {
   AspectRatio,
   Deck,
   DevicePreview,
+  EditorCommand,
+  SelectedElementInfo,
   Slide,
+  SlideLayerItem,
   SlideTemplate,
   SlideTheme,
   TransitionType,
 } from '../types/slideino';
 import { SLIDE_TEMPLATES } from '../data/starterDeck';
-import { SlideFrame } from './SlideFrame';
+import { SlideFrame, SlideFrameHandle } from './SlideFrame';
+import { VisualInspector } from './VisualInspector';
 
 interface StudioWorkspaceProps {
   deck: Deck;
@@ -51,7 +64,20 @@ interface StudioWorkspaceProps {
   onExportStandaloneHtml: () => void;
 }
 
-type InspectorTab = 'html' | 'css' | 'notes' | 'settings';
+type InspectorTab = 'design' | 'html' | 'css' | 'notes' | 'settings';
+
+interface SlideEditSnapshot {
+  html: string;
+  css: string;
+  backgroundOverride?: string;
+}
+
+interface SlideHistoryStack {
+  past: SlideEditSnapshot[];
+  future: SlideEditSnapshot[];
+}
+
+const MAX_HISTORY_ENTRIES = 50;
 
 export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
   deck,
@@ -72,12 +98,289 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
 }) => {
   const [leftRailOpen, setLeftRailOpen] = useState(true);
   const [rightInspectorOpen, setRightInspectorOpen] = useState(true);
-  const [inspectorTab, setInspectorTab] = useState<InspectorTab>('html');
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>('design');
+  const [editMode, setEditMode] = useState(true);
+  const [snapEnabled, setSnapEnabled] = useState(true);
   const [devicePreview, setDevicePreview] = useState<DevicePreview>('desktop');
   const [slideSearch, setSlideSearch] = useState('');
   const [templateMenuOpen, setTemplateMenuOpen] = useState(false);
 
+  const [selectedElement, setSelectedElement] = useState<SelectedElementInfo | null>(null);
+  const [layers, setLayers] = useState<SlideLayerItem[]>([]);
+  const [slideDir, setSlideDir] = useState<'ltr' | 'rtl'>('ltr');
+  const [historyTick, setHistoryTick] = useState(0);
+
+  const stageFrameRef = useRef<SlideFrameHandle>(null);
+  const quickImageInputRef = useRef<HTMLInputElement>(null);
+  const historyMapRef = useRef<Record<string, SlideHistoryStack>>({});
+  const lastCommittedHtmlRef = useRef<Record<string, SlideEditSnapshot>>({});
+  const codeHistoryTimerRef = useRef<number | null>(null);
+
   const activeSlide = deck.slides[activeSlideIndex] || deck.slides[0];
+
+  // Keep a baseline snapshot for the active slide so the first visual edit can always be undone
+  useEffect(() => {
+    if (!lastCommittedHtmlRef.current[activeSlide.id]) {
+      lastCommittedHtmlRef.current[activeSlide.id] = {
+        html: activeSlide.html,
+        css: activeSlide.css,
+        backgroundOverride: activeSlide.backgroundOverride,
+      };
+    }
+  }, [activeSlide.id, activeSlide.html, activeSlide.css, activeSlide.backgroundOverride]);
+
+  // Clear selection and any pending debounced code history timer when switching slides or leaving edit mode
+  useEffect(() => {
+    setSelectedElement(null);
+    setLayers([]);
+    if (codeHistoryTimerRef.current) {
+      window.clearTimeout(codeHistoryTimerRef.current);
+      codeHistoryTimerRef.current = null;
+    }
+  }, [activeSlide.id, editMode]);
+
+  useEffect(() => {
+    return () => {
+      if (codeHistoryTimerRef.current) {
+        window.clearTimeout(codeHistoryTimerRef.current);
+      }
+    };
+  }, []);
+
+  const getSlideHistory = useCallback((slideId: string): SlideHistoryStack => {
+    if (!historyMapRef.current[slideId]) {
+      historyMapRef.current[slideId] = { past: [], future: [] };
+    }
+    return historyMapRef.current[slideId];
+  }, []);
+
+  const recordHistorySnapshot = useCallback(
+    (slideId: string, prevSnapshot: SlideEditSnapshot, nextSnapshot: SlideEditSnapshot) => {
+      if (
+        prevSnapshot.html === nextSnapshot.html &&
+        prevSnapshot.css === nextSnapshot.css &&
+        prevSnapshot.backgroundOverride === nextSnapshot.backgroundOverride
+      ) {
+        return;
+      }
+      const stack = getSlideHistory(slideId);
+      stack.past.push(prevSnapshot);
+      if (stack.past.length > MAX_HISTORY_ENTRIES) {
+        stack.past.shift();
+      }
+      stack.future = [];
+      lastCommittedHtmlRef.current[slideId] = nextSnapshot;
+      setHistoryTick((t) => t + 1);
+    },
+    [getSlideHistory]
+  );
+
+  const handleUndo = useCallback(() => {
+    if (codeHistoryTimerRef.current) {
+      window.clearTimeout(codeHistoryTimerRef.current);
+      codeHistoryTimerRef.current = null;
+    }
+    const stack = getSlideHistory(activeSlide.id);
+    if (stack.past.length === 0) return;
+    const previous = stack.past.pop()!;
+    stack.future.push({
+      html: activeSlide.html,
+      css: activeSlide.css,
+      backgroundOverride: activeSlide.backgroundOverride,
+    });
+    lastCommittedHtmlRef.current[activeSlide.id] = previous;
+    setSelectedElement(null);
+    onUpdateSlide(activeSlide.id, {
+      html: previous.html,
+      css: previous.css,
+      backgroundOverride: previous.backgroundOverride,
+    });
+    setHistoryTick((t) => t + 1);
+  }, [
+    activeSlide.id,
+    activeSlide.html,
+    activeSlide.css,
+    activeSlide.backgroundOverride,
+    getSlideHistory,
+    onUpdateSlide,
+  ]);
+
+  const handleRedo = useCallback(() => {
+    if (codeHistoryTimerRef.current) {
+      window.clearTimeout(codeHistoryTimerRef.current);
+      codeHistoryTimerRef.current = null;
+    }
+    const stack = getSlideHistory(activeSlide.id);
+    if (stack.future.length === 0) return;
+    const next = stack.future.pop()!;
+    stack.past.push({
+      html: activeSlide.html,
+      css: activeSlide.css,
+      backgroundOverride: activeSlide.backgroundOverride,
+    });
+    lastCommittedHtmlRef.current[activeSlide.id] = next;
+    setSelectedElement(null);
+    onUpdateSlide(activeSlide.id, {
+      html: next.html,
+      css: next.css,
+      backgroundOverride: next.backgroundOverride,
+    });
+    setHistoryTick((t) => t + 1);
+  }, [
+    activeSlide.id,
+    activeSlide.html,
+    activeSlide.css,
+    activeSlide.backgroundOverride,
+    getSlideHistory,
+    onUpdateSlide,
+  ]);
+
+  const canUndo = useMemo(() => {
+    void historyTick;
+    return (historyMapRef.current[activeSlide.id]?.past.length || 0) > 0;
+  }, [activeSlide.id, historyTick]);
+
+  const canRedo = useMemo(() => {
+    void historyTick;
+    return (historyMapRef.current[activeSlide.id]?.future.length || 0) > 0;
+  }, [activeSlide.id, historyTick]);
+
+  // Host keyboard shortcuts for Undo/Redo when not focused in a native text input
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable)
+      ) {
+        return;
+      }
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) handleRedo();
+        else handleUndo();
+      } else if (mod && e.key.toLowerCase() === 'y') {
+        e.preventDefault();
+        handleRedo();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [handleUndo, handleRedo]);
+
+  const handleVisualHtmlChange = useCallback(
+    (newHtml: string, commit: boolean) => {
+      const baseline = lastCommittedHtmlRef.current[activeSlide.id] || {
+        html: activeSlide.html,
+        css: activeSlide.css,
+        backgroundOverride: activeSlide.backgroundOverride,
+      };
+      if (commit) {
+        recordHistorySnapshot(activeSlide.id, baseline, {
+          html: newHtml,
+          css: activeSlide.css,
+          backgroundOverride: activeSlide.backgroundOverride,
+        });
+      }
+      onUpdateSlide(activeSlide.id, { html: newHtml });
+    },
+    [
+      activeSlide.id,
+      activeSlide.html,
+      activeSlide.css,
+      activeSlide.backgroundOverride,
+      onUpdateSlide,
+      recordHistorySnapshot,
+    ]
+  );
+
+  const handleSlideFieldUpdateWithHistory = useCallback(
+    (patch: Partial<Slide>, immediate = false) => {
+      const slideId = activeSlide.id;
+      const baseline = lastCommittedHtmlRef.current[slideId] || {
+        html: activeSlide.html,
+        css: activeSlide.css,
+        backgroundOverride: activeSlide.backgroundOverride,
+      };
+      const nextSnap: SlideEditSnapshot = {
+        html: patch.html !== undefined ? patch.html : activeSlide.html,
+        css: patch.css !== undefined ? patch.css : activeSlide.css,
+        backgroundOverride:
+          'backgroundOverride' in patch
+            ? patch.backgroundOverride
+            : activeSlide.backgroundOverride,
+      };
+
+      onUpdateSlide(slideId, patch);
+
+      if (immediate) {
+        recordHistorySnapshot(slideId, baseline, nextSnap);
+        return;
+      }
+
+      if (codeHistoryTimerRef.current) {
+        window.clearTimeout(codeHistoryTimerRef.current);
+      }
+      codeHistoryTimerRef.current = window.setTimeout(() => {
+        recordHistorySnapshot(slideId, baseline, nextSnap);
+      }, 650);
+    },
+    [
+      activeSlide.id,
+      activeSlide.html,
+      activeSlide.css,
+      activeSlide.backgroundOverride,
+      onUpdateSlide,
+      recordHistorySnapshot,
+    ]
+  );
+
+  const handleSendEditorCommand = useCallback((command: EditorCommand) => {
+    stageFrameRef.current?.sendCommand(command);
+  }, []);
+
+  const handleToggleSnap = () => {
+    const next = !snapEnabled;
+    setSnapEnabled(next);
+    handleSendEditorCommand({ type: 'set-snap', enabled: next });
+  };
+
+  const handleQuickImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        handleSendEditorCommand({
+          type: 'insert-element',
+          elementType: 'image',
+          imgSrc: reader.result,
+          imgAlt: file.name.replace(/\.[^.]+$/, ''),
+        });
+      }
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const handleElementSelect = useCallback((element: SelectedElementInfo | null) => {
+    setSelectedElement(element);
+    if (element) {
+      setRightInspectorOpen(true);
+    }
+  }, []);
+
+  const handleLayersChange = useCallback(
+    (nextLayers: SlideLayerItem[], dir: 'ltr' | 'rtl') => {
+      setLayers(nextLayers);
+      setSlideDir(dir);
+      if (!snapEnabled) {
+        stageFrameRef.current?.sendCommand({ type: 'set-snap', enabled: false });
+      }
+    },
+    [snapEnabled]
+  );
 
   const filteredSlides = useMemo(() => {
     const q = slideSearch.trim().toLowerCase();
@@ -97,7 +400,7 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
     const end = el.selectionEnd;
     const val = el.value;
     const next = `${val.slice(0, start)}  ${val.slice(end)}`;
-    onUpdateSlide(activeSlide.id, { [field]: next });
+    handleSlideFieldUpdateWithHistory({ [field]: next });
     requestAnimationFrame(() => {
       el.selectionStart = el.selectionEnd = start + 2;
     });
@@ -272,7 +575,7 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
             {uiDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           </button>
 
-          {/* Toggle Code Inspector */}
+          {/* Toggle Right Inspector */}
           <button
             type="button"
             onClick={() => setRightInspectorOpen((v) => !v)}
@@ -281,8 +584,8 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
                 ? 'border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white'
                 : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
             }`}
-            aria-label={rightInspectorOpen ? 'Hide code editor' : 'Show code editor'}
-            title="Toggle Code Editor"
+            aria-label={rightInspectorOpen ? 'Hide inspector panel' : 'Show inspector panel'}
+            title="Toggle Inspector Panel"
           >
             <PanelRight className="w-4 h-4" />
           </button>
@@ -461,19 +764,163 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
           aria-label="Live slide canvas"
           className="flex-1 min-w-0 min-h-[340px] flex flex-col bg-slate-100/80 dark:bg-slate-950"
         >
-          <div className="flex-1 min-h-0 p-4 sm:p-8 flex items-center justify-center overflow-hidden">
+          {/* Stage Editing Bar */}
+          <div className="px-4 sm:px-6 py-2 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              {/* Visual Edit vs Preview Segmented Control */}
+              <div
+                role="group"
+                aria-label="Canvas mode"
+                className="flex items-center gap-0.5 p-0.5 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
+              >
+                <button
+                  type="button"
+                  onClick={() => setEditMode(true)}
+                  aria-pressed={editMode}
+                  className={`h-7 px-2.5 inline-flex items-center gap-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                    editMode
+                      ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                  }`}
+                >
+                  <MousePointer2 className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>Visual Edit</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditMode(false)}
+                  aria-pressed={!editMode}
+                  className={`h-7 px-2.5 inline-flex items-center gap-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                    !editMode
+                      ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                  }`}
+                >
+                  <Eye className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>Preview</span>
+                </button>
+              </div>
+
+              <span className="w-px h-4 bg-slate-200 dark:bg-slate-800" aria-hidden="true" />
+
+              {/* Undo / Redo */}
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={handleUndo}
+                  disabled={!canUndo}
+                  className="w-8 h-8 inline-flex items-center justify-center rounded-lg border border-transparent hover:border-slate-200 dark:hover:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 disabled:opacity-35 disabled:pointer-events-none cursor-pointer"
+                  aria-label="Undo slide edit"
+                  title="Undo (Ctrl/Cmd+Z)"
+                >
+                  <Undo2 className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRedo}
+                  disabled={!canRedo}
+                  className="w-8 h-8 inline-flex items-center justify-center rounded-lg border border-transparent hover:border-slate-200 dark:hover:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 disabled:opacity-35 disabled:pointer-events-none cursor-pointer"
+                  aria-label="Redo slide edit"
+                  title="Redo (Ctrl/Cmd+Shift+Z)"
+                >
+                  <Redo2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Quick Insert & Snap Controls (Visual Edit Mode) */}
+            {editMode && (
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleSendEditorCommand({ type: 'insert-element', elementType: 'text' })
+                  }
+                  className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-medium text-slate-700 dark:text-slate-200 whitespace-nowrap shrink-0 cursor-pointer"
+                  title="Insert text block"
+                >
+                  <Type className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span className="hidden xl:inline">Text</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleSendEditorCommand({ type: 'insert-element', elementType: 'shape' })
+                  }
+                  className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-medium text-slate-700 dark:text-slate-200 whitespace-nowrap shrink-0 cursor-pointer"
+                  title="Insert card or shape"
+                >
+                  <Square className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span className="hidden xl:inline">Shape</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleSendEditorCommand({ type: 'insert-element', elementType: 'divider' })
+                  }
+                  className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-medium text-slate-700 dark:text-slate-200 whitespace-nowrap shrink-0 cursor-pointer"
+                  title="Insert accent divider bar"
+                >
+                  <Minus className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span className="hidden xl:inline">Divider</span>
+                </button>
+                <input
+                  ref={quickImageInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleQuickImageUpload}
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  onClick={() => quickImageInputRef.current?.click()}
+                  className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-medium text-slate-700 dark:text-slate-200 whitespace-nowrap shrink-0 cursor-pointer"
+                  title="Insert image from computer"
+                >
+                  <ImageIcon className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span className="hidden xl:inline">Image</span>
+                </button>
+
+                <span className="w-px h-4 bg-slate-200 dark:bg-slate-800 mx-0.5" aria-hidden="true" />
+
+                <button
+                  type="button"
+                  onClick={handleToggleSnap}
+                  aria-pressed={snapEnabled}
+                  className={`h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg border text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                    snapEnabled
+                      ? 'border-blue-600/40 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300'
+                      : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
+                  }`}
+                  title="Toggle smart alignment snap guides (hold Alt while dragging to bypass)"
+                >
+                  <Magnet className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span className="hidden sm:inline">Snap</span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="flex-1 min-h-0 p-4 sm:p-6 flex items-center justify-center overflow-hidden">
             <div
               className={`w-full h-full ${deviceWidthClass} mx-auto flex items-center justify-center transition-[max-width] duration-200`}
             >
               <div className="w-full h-full flex items-center justify-center rounded-xl overflow-hidden shadow-md border border-slate-200/90 dark:border-slate-800 bg-slate-200/40 dark:bg-slate-900/50">
                 <SlideFrame
+                  ref={stageFrameRef}
                   slide={activeSlide}
                   theme={activeTheme}
                   libraries={deck.libraries}
                   customResources={deck.customResources}
                   sharedCss={deck.sharedCss}
                   aspectRatio={deck.aspectRatio}
+                  editMode={editMode}
                   onForwardKey={handleStageKeyForward}
+                  onVisualHtmlChange={handleVisualHtmlChange}
+                  onElementSelect={handleElementSelect}
+                  onLayersChange={handleLayersChange}
+                  onEditorUndo={handleUndo}
+                  onEditorRedo={handleRedo}
                 />
               </div>
             </div>
@@ -488,7 +935,13 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
               <span aria-hidden="true">·</span>
               <span className="whitespace-nowrap">{deck.aspectRatio}</span>
               <span aria-hidden="true" className="hidden sm:inline">·</span>
-              <span className="hidden sm:inline whitespace-nowrap">{activeTheme.name}</span>
+              <span className="hidden sm:inline whitespace-nowrap">
+                {editMode
+                  ? selectedElement
+                    ? `Selected: ${selectedElement.tag}`
+                    : 'Click to select · Double-click text to edit'
+                  : activeTheme.name}
+              </span>
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
@@ -518,25 +971,26 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
           </div>
         </section>
 
-        {/* Right Code & Properties Inspector */}
+        {/* Right Design, Code & Properties Inspector */}
         {rightInspectorOpen && (
           <aside
-            aria-label="Slide code and settings editor"
-            className="w-full lg:w-[390px] xl:w-[440px] shrink-0 bg-white dark:bg-slate-900 border-t lg:border-t-0 lg:border-l border-slate-200 dark:border-slate-800 flex flex-col min-h-[300px] lg:min-h-0"
+            aria-label="Slide design, code, and settings inspector"
+            className="w-full lg:w-[360px] xl:w-[400px] shrink-0 bg-white dark:bg-slate-900 border-t lg:border-t-0 lg:border-l border-slate-200 dark:border-slate-800 flex flex-col min-h-[300px] lg:min-h-0"
           >
             {/* Inspector Tabs */}
             <div className="px-3 pt-2.5 pb-2 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2">
               <div
                 role="tablist"
                 aria-label="Slide inspector tabs"
-                className="flex items-center gap-1 p-1 rounded-lg bg-slate-100 dark:bg-slate-800 w-full"
+                className="flex items-center gap-0.5 p-1 rounded-lg bg-slate-100 dark:bg-slate-800 w-full"
               >
                 {(
                   [
+                    { id: 'design', label: 'Design' },
                     { id: 'html', label: 'HTML' },
                     { id: 'css', label: 'CSS' },
                     { id: 'notes', label: 'Notes' },
-                    { id: 'settings', label: 'Settings' },
+                    { id: 'settings', label: 'Slide' },
                   ] as const
                 ).map((tab) => (
                   <button
@@ -559,18 +1013,34 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
 
             {/* Inspector Body */}
             <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+              {inspectorTab === 'design' && (
+                <VisualInspector
+                  editMode={editMode}
+                  slide={activeSlide}
+                  theme={activeTheme}
+                  slideDir={slideDir}
+                  selectedElement={selectedElement}
+                  layers={layers}
+                  onEnableEditMode={() => setEditMode(true)}
+                  onUpdateSlide={(patch) => handleSlideFieldUpdateWithHistory(patch, true)}
+                  onSendCommand={handleSendEditorCommand}
+                />
+              )}
+
               {inspectorTab === 'html' && (
                 <div className="flex-1 min-h-0 flex flex-col">
                   <div className="px-4 py-2 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
                     <span className="inline-flex items-center gap-1.5">
                       <Code2 className="w-3.5 h-3.5" aria-hidden="true" />
-                      <span>HTML Markup (Fragments or Full Doc)</span>
+                      <span>HTML Markup (Synced with Canvas)</span>
                     </span>
                     <span className="font-mono tabular-nums">{activeSlide.html.length} chars</span>
                   </div>
                   <textarea
                     value={activeSlide.html}
-                    onChange={(e) => onUpdateSlide(activeSlide.id, { html: e.target.value })}
+                    onChange={(e) =>
+                      handleSlideFieldUpdateWithHistory({ html: e.target.value })
+                    }
                     onKeyDown={(e) => handleCodeTabKey(e, 'html')}
                     spellCheck={false}
                     aria-label="Slide HTML code"
@@ -587,7 +1057,9 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
                   </div>
                   <textarea
                     value={activeSlide.css}
-                    onChange={(e) => onUpdateSlide(activeSlide.id, { css: e.target.value })}
+                    onChange={(e) =>
+                      handleSlideFieldUpdateWithHistory({ css: e.target.value })
+                    }
                     onKeyDown={(e) => handleCodeTabKey(e, 'css')}
                     placeholder="/* Use var(--slide-bg), var(--slide-text), var(--slide-accent) */"
                     spellCheck={false}
@@ -667,9 +1139,10 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
                         type="text"
                         value={activeSlide.backgroundOverride || ''}
                         onChange={(e) =>
-                          onUpdateSlide(activeSlide.id, {
-                            backgroundOverride: e.target.value || undefined,
-                          })
+                          handleSlideFieldUpdateWithHistory(
+                            { backgroundOverride: e.target.value || undefined },
+                            true
+                          )
                         }
                         placeholder={`Inherits theme (${activeTheme.tokens.bg})`}
                         className="flex-1 h-10 px-3 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-mono text-slate-900 dark:text-slate-100"
@@ -678,7 +1151,10 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
                         <button
                           type="button"
                           onClick={() =>
-                            onUpdateSlide(activeSlide.id, { backgroundOverride: undefined })
+                            handleSlideFieldUpdateWithHistory(
+                              { backgroundOverride: undefined },
+                              true
+                            )
                           }
                           className="h-10 px-3 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
                         >

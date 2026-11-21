@@ -5,6 +5,7 @@ import {
   SlideTheme,
 } from '../types/slideino';
 import { isValidHttpsUrl } from './storage';
+import { buildVisualEditorInjection } from './visualEditorScript';
 
 export interface BuildSlideOptions {
   slide: Slide;
@@ -15,6 +16,7 @@ export interface BuildSlideOptions {
   instanceId: string;
   origin: string;
   isThumbnail?: boolean;
+  editMode?: boolean;
   prefersReducedMotion?: boolean;
 }
 
@@ -226,15 +228,17 @@ function buildRuntimeBootstrapScript(
   instanceId: string,
   theme: SlideTheme,
   libraries: LibraryConfig,
-  isThumbnail: boolean
+  isThumbnail: boolean,
+  editMode: boolean
 ): string {
   const safeId = JSON.stringify(instanceId);
   const mermaidTheme = theme.isDark ? 'dark' : 'neutral';
 
-  return `<script>
+  return `<script data-slideino-runtime="true">
 (function() {
   var INSTANCE_ID = ${safeId};
   var IS_THUMBNAIL = ${isThumbnail ? 'true' : 'false'};
+  var EDIT_MODE = ${editMode ? 'true' : 'false'};
 
   function postHost(type, payload) {
     try {
@@ -254,7 +258,7 @@ function buildRuntimeBootstrapScript(
     });
   });
 
-  if (!IS_THUMBNAIL) {
+  if (!IS_THUMBNAIL && !EDIT_MODE) {
     window.addEventListener('keydown', function(e) {
       var tag = (e.target && e.target.tagName || '').toLowerCase();
       if (tag === 'input' || tag === 'textarea' || tag === 'select' || (e.target && e.target.isContentEditable)) {
@@ -345,6 +349,7 @@ export function buildSlideDocument(options: BuildSlideOptions): string {
     instanceId,
     origin,
     isThumbnail = false,
+    editMode = false,
     prefersReducedMotion = false,
   } = options;
 
@@ -356,6 +361,7 @@ export function buildSlideDocument(options: BuildSlideOptions): string {
   // Detect if slide is a complete HTML document (<!DOCTYPE html> or <html>)
   const isFullDocument = /<!doctype\s+html|<html[\s>]/i.test(processedHtml);
   const isStandalone = Boolean(slide.standalone) || isFullDocument;
+  const activeEditMode = Boolean(editMode && !isThumbnail);
 
   const headTags = buildLibraryHeadTags(
     libraries,
@@ -371,8 +377,12 @@ export function buildSlideDocument(options: BuildSlideOptions): string {
     instanceId,
     theme,
     libraries,
-    isThumbnail
+    isThumbnail,
+    activeEditMode
   );
+  const visualEditorScript = activeEditMode
+    ? buildVisualEditorInjection(instanceId, isFullDocument)
+    : '';
 
   if (isFullDocument) {
     let doc = processedHtml;
@@ -415,10 +425,11 @@ export function buildSlideDocument(options: BuildSlideOptions): string {
       doc = `${overrideSuffix}\n${doc}`;
     }
 
+    const bodySuffix = [runtimeScript, visualEditorScript].filter(Boolean).join('\n');
     if (/<\/body>/i.test(doc)) {
-      doc = doc.replace(/<\/body>/i, `${runtimeScript}\n</body>`);
+      doc = doc.replace(/<\/body>/i, `${bodySuffix}\n</body>`);
     } else {
-      doc = `${doc}\n${runtimeScript}`;
+      doc = `${doc}\n${bodySuffix}`;
     }
     return doc;
   }
@@ -440,6 +451,7 @@ export function buildSlideDocument(options: BuildSlideOptions): string {
 <body>
 ${processedHtml}
 ${runtimeScript}
+${visualEditorScript}
 </body>
 </html>`;
 }

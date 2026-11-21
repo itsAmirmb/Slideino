@@ -120,3 +120,83 @@ export const ASPECT_RATIO_DIMENSIONS: Record<
   '4:3': { width: 1024, height: 768, label: '4:3 Classic' },
   '9:16': { width: 720, height: 1280, label: '9:16 Vertical' },
 };
+
+export type InsertElementType = 'heading' | 'text' | 'shape' | 'divider' | 'image';
+
+export interface SlideLayerItem {
+  id: string;
+  tag: string;
+  label: string;
+  kind: 'text' | 'image' | 'shape' | 'container';
+  zIndex: number;
+}
+
+export interface SelectedElementInfo {
+  id: string;
+  tag: string;
+  label: string;
+  kind: 'text' | 'image' | 'shape' | 'container';
+  hasParent: boolean;
+  isTextEditable: boolean;
+  textContent: string;
+  dir: 'ltr' | 'rtl' | '';
+  // Geometry (in slide canvas px)
+  positionMode: 'absolute' | 'relative' | 'static' | 'fixed' | 'sticky';
+  horizontalAnchor: 'left' | 'right';
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  zIndex: number;
+  // Typography
+  fontSize: number;
+  fontWeight: string;
+  textAlign: 'left' | 'center' | 'right' | 'justify';
+  color: string;
+  lineHeight: string;
+  letterSpacing: string;
+  // Appearance
+  backgroundColor: string;
+  borderRadius: number;
+  opacity: number;
+  padding: number;
+  // Image specific
+  imgSrc?: string;
+  imgAlt?: string;
+  objectFit?: string;
+}
+
+export interface ElementStylePatch {
+  textContent?: string;
+  dir?: 'ltr' | 'rtl' | '';
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  zIndex?: number;
+  fontSize?: number;
+  fontWeight?: string;
+  textAlign?: 'left' | 'center' | 'right' | 'justify';
+  color?: string;
+  lineHeight?: string;
+  letterSpacing?: string;
+  backgroundColor?: string;
+  borderRadius?: number;
+  opacity?: number;
+  padding?: number;
+  imgSrc?: string;
+  imgAlt?: string;
+  objectFit?: string;
+}
+
+export type EditorCommand =
+  | { type: 'select-element'; id: string | null }
+  | { type: 'select-parent' }
+  | { type: 'update-element'; id: string; patch: ElementStylePatch }
+  | { type: 'delete-selected' }
+  | { type: 'duplicate-selected' }
+  | { type: 'reorder-z'; direction: 'forward' | 'backward' | 'front' | 'back' }
+  | { type: 'insert-element'; elementType: InsertElementType; imgSrc?: string; imgAlt?: string }
+  | { type: 'set-slide-dir'; dir: 'ltr' | 'rtl' }
+  | { type: 'set-snap'; enabled: boolean }
+  | { type: 'request-layers' };
