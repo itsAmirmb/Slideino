@@ -14,6 +14,7 @@ import {
   CustomResource,
   EditorCommand,
   LibraryConfig,
+  MultiSelectionSummary,
   SelectedElementInfo,
   Slide,
   SlideLayerItem,
@@ -38,7 +39,10 @@ interface SlideFrameProps {
   onScaleChange?: (scale: number) => void;
   onForwardKey?: (key: string, shiftKey: boolean) => void;
   onVisualHtmlChange?: (html: string, commit: boolean) => void;
-  onElementSelect?: (element: SelectedElementInfo | null) => void;
+  onElementSelect?: (
+    element: SelectedElementInfo | null,
+    multiSelection: MultiSelectionSummary | null
+  ) => void;
   onLayersChange?: (
     layers: SlideLayerItem[],
     slideDir: 'ltr' | 'rtl',
@@ -171,7 +175,10 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(
           lastVisualHtmlRef.current = data.payload.html;
           onVisualHtmlChange(data.payload.html, Boolean(data.payload.commit));
         } else if (data.type === 'element-select' && onElementSelect && data.payload) {
-          onElementSelect(data.payload.element || null);
+          onElementSelect(
+            data.payload.element || null,
+            data.payload.multiSelection || null
+          );
         } else if (
           data.type === 'layers-change' &&
           onLayersChange &&

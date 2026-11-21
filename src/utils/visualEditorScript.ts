@@ -116,8 +116,16 @@ html[data-sl-resize-cursor="ew-resize"] * {
   pointer-events: auto;
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.25);
 }
-.__sl_sel_box__.is-editing .__sl_handle__ {
+.__sl_sel_box__.is-editing .__sl_handle__,
+.__sl_sel_box__.is-multi .__sl_handle__ {
   display: none;
+}
+.__sl_multi_box__ {
+  position: fixed;
+  pointer-events: none;
+  border: 1.5px solid rgba(37, 99, 235, 0.85);
+  background: rgba(37, 99, 235, 0.05);
+  box-sizing: border-box;
 }
 .__sl_sel_box__.is-compact .__sl_handle__[data-h="n"],
 .__sl_sel_box__.is-compact .__sl_handle__[data-h="s"],
@@ -162,12 +170,14 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
   var IS_FULL_DOC = ${fullDocFlag};
   var snapEnabled = true;
   var uidCounter = 1;
+  var selectedEls = [];
   var selectedEl = null;
   var hoveredEl = null;
   var editingEl = null;
   var dragState = null;
   var resizeState = null;
   var overlayRoot = null;
+  var multiBoxesLayer = null;
   var hoverBox = null;
   var hoverBadge = null;
   var selBox = null;
@@ -244,8 +254,11 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
     if (!el || !el.tagName) return 'Element';
     var tag = el.tagName.toLowerCase();
     var objType = (el.getAttribute('data-object-type') || '').toLowerCase();
+    if (objType === 'group') return 'Group';
     if (objType === 'textbox') return 'Text Box';
     if (objType === 'shape') return 'Shape';
+    if (objType === 'badge') return 'Tag';
+    if (objType === 'arrow') return 'Arrow';
     if (/^h[1-6]$/.test(tag)) return 'Heading';
     if (tag === 'p') return 'Paragraph';
     if (tag === 'span' || tag === 'label' || tag === 'small' || tag === 'strong' || tag === 'em' || tag === 'mark') return 'Text';
@@ -417,13 +430,19 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
         };
       });
 
+    var elTagLower = el.tagName.toLowerCase();
+    var canUngroup =
+      directChildren.length >= 1 &&
+      ['div', 'section', 'article', 'header', 'footer', 'main', 'aside', 'nav', 'ul', 'ol', 'figure'].indexOf(elTagLower) !== -1;
+
     var info = {
       id: id,
-      tag: el.tagName.toLowerCase(),
+      tag: elTagLower,
       friendlyName: getFriendlyTagName(el),
       label: getElementLabel(el),
       kind: kind,
       hasParent: hasParent,
+      canUngroup: canUngroup,
       hasText: hasText,
       isTextEditable: canEditTextDirectly(el) && hasSimpleDirectText(el),
       textContent: hasSimpleDirectText(el) ? (el.innerText || el.textContent || '').trim() : '',
@@ -583,18 +602,50 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
     return bodyClone.innerHTML.trim();
   }
 
+  function emitSelectionToHost() {
+    selectedEls = selectedEls.filter(function(el) { return el && document.contains(el); });
+    selectedEl = selectedEls.length === 1 ? selectedEls[0] : null;
+    if (selectedEls.length > 1) {
+      postHost('element-select', {
+        element: null,
+        multiSelection: {
+          count: selectedEls.length,
+          ids: selectedEls.map(function(el) { return ensureUid(el); }),
+          labels: selectedEls.map(function(el) { return getElementLabel(el); })
+        }
+      });
+    } else {
+      postHost('element-select', {
+        element: selectedEl ? buildElementInfo(selectedEl) : null,
+        multiSelection: null
+      });
+    }
+  }
+
   function syncToHost(commit) {
     var cleanHtml = serializeCleanHtml();
     postHost('dom-sync', {
       html: cleanHtml,
       commit: Boolean(commit)
     });
-    if (selectedEl && document.contains(selectedEl)) {
-      postHost('element-select', { element: buildElementInfo(selectedEl) });
-    }
+    emitSelectionToHost();
     if (commit) {
       emitLayers();
     }
+  }
+
+  function isElSelected(el) {
+    return Boolean(el && selectedEls.indexOf(el) !== -1);
+  }
+
+  function isInsideSelected(rawTarget) {
+    if (!rawTarget) return false;
+    for (var i = 0; i < selectedEls.length; i++) {
+      if (selectedEls[i] && document.contains(selectedEls[i]) && selectedEls[i].contains(rawTarget)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   function setHoveredElement(el) {
@@ -602,17 +653,31 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
     if (hoveredEl && document.contains(hoveredEl)) {
       hoveredEl.removeAttribute('data-sl-hover');
     }
-    hoveredEl = el && el !== selectedEl && document.contains(el) ? el : null;
+    hoveredEl = el && !isElSelected(el) && document.contains(el) ? el : null;
     if (hoveredEl) {
       hoveredEl.setAttribute('data-sl-hover', 'true');
     }
     updateOverlayBoxes();
   }
 
+  function getCombinedBounds(els) {
+    var minL = Infinity, minT = Infinity, maxR = -Infinity, maxB = -Infinity;
+    for (var i = 0; i < els.length; i++) {
+      if (!els[i] || !document.contains(els[i])) continue;
+      var r = els[i].getBoundingClientRect();
+      if (r.left < minL) minL = r.left;
+      if (r.top < minT) minT = r.top;
+      if (r.right > maxR) maxR = r.right;
+      if (r.bottom > maxB) maxB = r.bottom;
+    }
+    if (!Number.isFinite(minL)) return null;
+    return { left: minL, top: minT, right: maxR, bottom: maxB, width: maxR - minL, height: maxB - minT };
+  }
+
   function updateOverlayBoxes() {
     if (!selBox || !hoverBox) return;
 
-    if (hoveredEl && hoveredEl !== selectedEl && !dragState && !resizeState && document.contains(hoveredEl)) {
+    if (hoveredEl && !isElSelected(hoveredEl) && !dragState && !resizeState && document.contains(hoveredEl)) {
       var hr = hoveredEl.getBoundingClientRect();
       hoverBox.style.display = 'block';
       hoverBox.style.left = hr.left + 'px';
@@ -627,18 +692,51 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
       hoverBox.style.display = 'none';
     }
 
-    if (selectedEl && document.contains(selectedEl)) {
-      var sr = selectedEl.getBoundingClientRect();
+    if (multiBoxesLayer) {
+      multiBoxesLayer.innerHTML = '';
+    }
+
+    var liveSelected = selectedEls.filter(function(el) { return el && document.contains(el); });
+    if (liveSelected.length > 1) {
+      var cb = getCombinedBounds(liveSelected);
+      if (cb) {
+        selBox.style.display = 'block';
+        selBox.style.left = cb.left + 'px';
+        selBox.style.top = cb.top + 'px';
+        selBox.style.width = Math.max(4, cb.width) + 'px';
+        selBox.style.height = Math.max(4, cb.height) + 'px';
+        selBox.classList.remove('is-editing', 'is-compact');
+        selBox.classList.add('is-multi');
+        selBadge.textContent = liveSelected.length + ' objects · Drag to move · Ctrl+G to group';
+        selBadge.style.top = cb.top < 28 ? (Math.max(4, cb.height) + 4) + 'px' : '-24px';
+
+        if (multiBoxesLayer) {
+          for (var i = 0; i < liveSelected.length; i++) {
+            var mr = liveSelected[i].getBoundingClientRect();
+            var mb = document.createElement('div');
+            mb.className = '__sl_multi_box__';
+            mb.style.left = mr.left + 'px';
+            mb.style.top = mr.top + 'px';
+            mb.style.width = Math.max(2, mr.width) + 'px';
+            mb.style.height = Math.max(2, mr.height) + 'px';
+            multiBoxesLayer.appendChild(mb);
+          }
+        }
+      }
+    } else if (liveSelected.length === 1) {
+      var single = liveSelected[0];
+      var sr = single.getBoundingClientRect();
       selBox.style.display = 'block';
       selBox.style.left = sr.left + 'px';
       selBox.style.top = sr.top + 'px';
       selBox.style.width = Math.max(4, sr.width) + 'px';
       selBox.style.height = Math.max(4, sr.height) + 'px';
-      selBox.classList.toggle('is-editing', editingEl === selectedEl);
+      selBox.classList.remove('is-multi');
+      selBox.classList.toggle('is-editing', editingEl === single);
       selBox.classList.toggle('is-compact', sr.width < 48 || sr.height < 32);
 
-      var badgeText = getFriendlyTagName(selectedEl) + ' · ' + Math.round(sr.width) + '×' + Math.round(sr.height);
-      if (editingEl === selectedEl) {
+      var badgeText = getFriendlyTagName(single) + ' · ' + Math.round(sr.width) + '×' + Math.round(sr.height);
+      if (editingEl === single) {
         badgeText = 'Editing Text · Esc to finish';
       }
       selBadge.textContent = badgeText;
@@ -688,25 +786,56 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
     }
   }
 
-  function selectElement(el) {
-    if (editingEl && editingEl !== el) {
+  function setSelection(nextList) {
+    if (editingEl && (nextList.length !== 1 || nextList[0] !== editingEl)) {
       stopInlineEditing(true);
     }
-    if (selectedEl && document.contains(selectedEl)) {
-      selectedEl.removeAttribute('data-sl-selected');
+    for (var i = 0; i < selectedEls.length; i++) {
+      if (selectedEls[i] && document.contains(selectedEls[i])) {
+        selectedEls[i].removeAttribute('data-sl-selected');
+      }
     }
-    selectedEl = el && document.contains(el) ? el : null;
-    if (selectedEl) {
-      selectedEl.setAttribute('data-sl-selected', 'true');
-      if (hoveredEl === selectedEl) {
+    var cleaned = [];
+    for (var j = 0; j < nextList.length; j++) {
+      var cand = nextList[j];
+      if (!cand || !document.contains(cand) || isCanvasShell(cand) || isEditorNode(cand)) continue;
+      if (cleaned.indexOf(cand) === -1) cleaned.push(cand);
+    }
+    selectedEls = cleaned;
+    selectedEl = selectedEls.length === 1 ? selectedEls[0] : null;
+    for (var k = 0; k < selectedEls.length; k++) {
+      selectedEls[k].setAttribute('data-sl-selected', 'true');
+      if (hoveredEl === selectedEls[k]) {
         hoveredEl.removeAttribute('data-sl-hover');
         hoveredEl = null;
       }
     }
     updateOverlayBoxes();
-    postHost('element-select', {
-      element: selectedEl ? buildElementInfo(selectedEl) : null
-    });
+    emitSelectionToHost();
+  }
+
+  function selectElement(el, additive) {
+    if (!el) {
+      setSelection([]);
+      return;
+    }
+    if (additive) {
+      var existingIdx = selectedEls.indexOf(el);
+      if (existingIdx !== -1) {
+        var nextRemoved = selectedEls.slice();
+        nextRemoved.splice(existingIdx, 1);
+        setSelection(nextRemoved);
+        return;
+      }
+      // Prevent mixing ancestor and descendant in the same multi-selection
+      var filtered = selectedEls.filter(function(item) {
+        return !item.contains(el) && !el.contains(item);
+      });
+      filtered.push(el);
+      setSelection(filtered);
+      return;
+    }
+    setSelection([el]);
   }
 
   function startInlineEditing(el) {
@@ -807,6 +936,8 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
     guideH = document.createElement('div');
     guideH.className = '__sl_guide_h__';
 
+    multiBoxesLayer = document.createElement('div');
+    overlayRoot.appendChild(multiBoxesLayer);
     overlayRoot.appendChild(hoverBox);
     overlayRoot.appendChild(selBox);
     overlayRoot.appendChild(guideV);
@@ -951,6 +1082,11 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
     var borderCol = isDarkSlide ? 'rgba(148, 163, 184, 0.25)' : 'rgba(15, 23, 42, 0.15)';
     var fontStack = window.getComputedStyle(document.body).fontFamily || 'system-ui, sans-serif';
 
+    var mutedInk = isDarkSlide ? '#94A3B8' : '#475569';
+    var badgeBg = isDarkSlide ? 'rgba(37, 99, 235, 0.22)' : 'rgba(37, 99, 235, 0.12)';
+    var badgeInk = isDarkSlide ? '#93C5FD' : '#1D4ED8';
+    var calloutBg = isDarkSlide ? 'rgba(30, 41, 59, 0.92)' : 'rgba(239, 246, 255, 0.95)';
+
     var el;
     if (elementType === 'heading') {
       el = document.createElement('div');
@@ -964,6 +1100,52 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
       el.setAttribute('data-object-type', 'textbox');
       el.textContent = isRtl ? 'برای ویرایش متن دو بار کلیک کنید.' : 'Double-click to edit this text block.';
       el.style.cssText = 'position:absolute;left:' + Math.round(rootRect.width / 2 - 220) + 'px;top:' + Math.round(rootRect.height / 2 - 24) + 'px;width:440px;min-height:48px;z-index:20;font-size:20px;font-weight:400;line-height:1.5;color:' + inkColor + ';font-family:' + fontStack + ';text-align:' + (isRtl ? 'right' : 'left') + ';';
+    } else if (elementType === 'bullets') {
+      el = document.createElement('ul');
+      el.setAttribute('data-object', 'true');
+      el.setAttribute('data-object-type', 'textbox');
+      el.style.cssText = 'position:absolute;left:' + Math.round(rootRect.width / 2 - 220) + 'px;top:' + Math.round(rootRect.height / 2 - 70) + 'px;width:440px;z-index:20;margin:0;padding-' + (isRtl ? 'right' : 'left') + ':24px;font-size:20px;line-height:1.65;color:' + inkColor + ';font-family:' + fontStack + ';text-align:' + (isRtl ? 'right' : 'left') + ';list-style-type:disc;';
+      var bulletItems = isRtl
+        ? ['نکته کلیدی اول را اینجا بنویسید', 'نکته کلیدی دوم با جزئیات کوتاه', 'نتیجه‌گیری یا گام بعدی']
+        : ['First key takeaway for your audience', 'Second supporting point or metric', 'Clear next step or action item'];
+      bulletItems.forEach(function(txt) {
+        var li = document.createElement('li');
+        li.textContent = txt;
+        li.style.marginBottom = '8px';
+        el.appendChild(li);
+      });
+    } else if (elementType === 'kpi') {
+      el = document.createElement('div');
+      el.setAttribute('data-object', 'true');
+      el.setAttribute('data-object-type', 'group');
+      el.style.cssText = 'position:absolute;left:' + Math.round(rootRect.width / 2 - 140) + 'px;top:' + Math.round(rootRect.height / 2 - 75) + 'px;width:280px;min-height:144px;z-index:18;padding:24px;background-color:' + surfaceBg + ';border:1px solid ' + borderCol + ';border-radius:14px;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;gap:6px;text-align:' + (isRtl ? 'right' : 'left') + ';font-family:' + fontStack + ';';
+      var valSpan = document.createElement('span');
+      valSpan.textContent = '98.4%';
+      valSpan.style.cssText = 'font-size:44px;font-weight:800;line-height:1.05;color:#2563EB;font-variant-numeric:tabular-nums;';
+      var lblSpan = document.createElement('span');
+      lblSpan.textContent = isRtl ? 'شاخص کلیدی عملکرد' : 'Key Performance Metric';
+      lblSpan.style.cssText = 'font-size:15px;font-weight:500;line-height:1.4;color:' + mutedInk + ';';
+      el.appendChild(valSpan);
+      el.appendChild(lblSpan);
+    } else if (elementType === 'callout') {
+      el = document.createElement('div');
+      el.setAttribute('data-object', 'true');
+      el.setAttribute('data-object-type', 'group');
+      el.style.cssText = 'position:absolute;left:' + Math.round(rootRect.width / 2 - 240) + 'px;top:' + Math.round(rootRect.height / 2 - 58) + 'px;width:480px;min-height:108px;z-index:18;padding:20px 24px;background-color:' + calloutBg + ';border:1px solid ' + borderCol + ';border-' + (isRtl ? 'right' : 'left') + ':4px solid #2563EB;border-radius:10px;box-sizing:border-box;display:flex;flex-direction:column;gap:6px;text-align:' + (isRtl ? 'right' : 'left') + ';font-family:' + fontStack + ';';
+      var cTitle = document.createElement('span');
+      cTitle.textContent = isRtl ? 'نکته کلیدی' : 'Key Takeaway';
+      cTitle.style.cssText = 'font-size:14px;font-weight:700;color:#2563EB;letter-spacing:0.02em;';
+      var cBody = document.createElement('span');
+      cBody.textContent = isRtl ? 'پیام مهم یا نقل‌قول اصلی این اسلاید را اینجا برجسته کنید.' : 'Highlight the core insight or decision your audience should remember.';
+      cBody.style.cssText = 'font-size:17px;font-weight:400;line-height:1.5;color:' + inkColor + ';';
+      el.appendChild(cTitle);
+      el.appendChild(cBody);
+    } else if (elementType === 'badge') {
+      el = document.createElement('span');
+      el.setAttribute('data-object', 'true');
+      el.setAttribute('data-object-type', 'badge');
+      el.textContent = isRtl ? 'برچسب جدید' : 'Section Tag';
+      el.style.cssText = 'position:absolute;left:' + Math.round(rootRect.width / 2 - 70) + 'px;top:' + Math.round(rootRect.height / 2 - 18) + 'px;display:inline-block;padding:6px 14px;z-index:22;font-size:13px;font-weight:600;line-height:1.2;color:' + badgeInk + ';background-color:' + badgeBg + ';border:1px solid rgba(37,99,235,0.35);border-radius:999px;font-family:' + fontStack + ';white-space:nowrap;';
     } else if (elementType === 'shape') {
       el = document.createElement('div');
       el.setAttribute('data-object', 'true');
@@ -974,6 +1156,14 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
       el.setAttribute('data-object', 'true');
       el.setAttribute('data-object-type', 'shape');
       el.style.cssText = 'position:absolute;left:' + Math.round(rootRect.width / 2 - 200) + 'px;top:' + Math.round(rootRect.height / 2) + 'px;width:400px;height:3px;z-index:18;background-color:#2563EB;border-radius:2px;';
+    } else if (elementType === 'arrow') {
+      el = document.createElement('div');
+      el.setAttribute('data-object', 'true');
+      el.setAttribute('data-object-type', 'arrow');
+      el.style.cssText = 'position:absolute;left:' + Math.round(rootRect.width / 2 - 90) + 'px;top:' + Math.round(rootRect.height / 2 - 16) + 'px;width:180px;height:32px;z-index:19;color:#2563EB;display:flex;align-items:center;';
+      el.innerHTML = isRtl
+        ? '<svg viewBox="0 0 180 32" width="100%" height="100%" fill="none" xmlns="http://www.w3.org/2000/svg"><line x1="174" y1="16" x2="12" y2="16" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><polyline points="22,6 10,16 22,26" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+        : '<svg viewBox="0 0 180 32" width="100%" height="100%" fill="none" xmlns="http://www.w3.org/2000/svg"><line x1="6" y1="16" x2="168" y2="16" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><polyline points="158,6 170,16 158,26" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
     } else if (elementType === 'image' && imgSrc) {
       el = document.createElement('img');
       el.setAttribute('data-object', 'true');
@@ -988,19 +1178,17 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
     root.appendChild(el);
     selectElement(el);
     syncToHost(true);
-    if (elementType === 'heading' || elementType === 'text') {
+    if (elementType === 'heading' || elementType === 'text' || elementType === 'badge') {
       startInlineEditing(el);
     }
   }
 
   function deleteSelected() {
-    if (!selectedEl || isCanvasShell(selectedEl)) return;
+    var list = selectedEls.filter(function(el) { return el && !isCanvasShell(el) && document.contains(el); });
+    if (list.length === 0) return;
     stopInlineEditing(false);
-    var toRemove = selectedEl;
-    selectedEl = null;
-    toRemove.remove();
-    updateOverlayBoxes();
-    postHost('element-select', { element: null });
+    setSelection([]);
+    list.forEach(function(item) { item.remove(); });
     syncToHost(true);
   }
 
@@ -1083,6 +1271,203 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
     syncToHost(true);
   }
 
+  function preserveComputedTextStyles(el, cs) {
+    if (!el.style.fontFamily && cs.fontFamily) el.style.fontFamily = cs.fontFamily;
+    if (!el.style.fontSize && cs.fontSize) el.style.fontSize = cs.fontSize;
+    if (!el.style.fontWeight && cs.fontWeight) el.style.fontWeight = cs.fontWeight;
+    if (!el.style.color && cs.color) el.style.color = cs.color;
+    if (!el.style.lineHeight && cs.lineHeight && cs.lineHeight !== 'normal') el.style.lineHeight = cs.lineHeight;
+    if (!el.style.textAlign && cs.textAlign) el.style.textAlign = cs.textAlign;
+  }
+
+  function groupSelected() {
+    var list = selectedEls.filter(function(el) { return el && !isCanvasShell(el) && document.contains(el); });
+    if (list.length < 2) return;
+    var root = getCanvasRoot();
+    if (!root) return;
+    if (window.getComputedStyle(root).position === 'static') {
+      root.style.position = 'relative';
+    }
+    var rootRect = root.getBoundingClientRect();
+    var bounds = getCombinedBounds(list);
+    if (!bounds) return;
+
+    var snapshots = list.map(function(el) {
+      var r = el.getBoundingClientRect();
+      var cs = window.getComputedStyle(el);
+      var z = parseInt(cs.zIndex, 10);
+      return { el: el, rect: r, cs: cs, z: Number.isFinite(z) ? z : 10 };
+    });
+
+    var maxZ = snapshots.reduce(function(acc, s) { return Math.max(acc, s.z); }, 10);
+    var group = document.createElement('div');
+    group.setAttribute('data-object', 'true');
+    group.setAttribute('data-object-type', 'group');
+    group.style.position = 'absolute';
+    group.style.left = Math.round(bounds.left - rootRect.left) + 'px';
+    group.style.top = Math.round(bounds.top - rootRect.top) + 'px';
+    group.style.width = Math.max(16, Math.round(bounds.width)) + 'px';
+    group.style.height = Math.max(16, Math.round(bounds.height)) + 'px';
+    group.style.zIndex = String(maxZ);
+
+    root.appendChild(group);
+
+    snapshots.forEach(function(s) {
+      preserveComputedTextStyles(s.el, s.cs);
+      s.el.style.position = 'absolute';
+      s.el.style.display = s.cs.display === 'inline' ? 'inline-block' : s.cs.display;
+      s.el.style.left = Math.round(s.rect.left - bounds.left) + 'px';
+      s.el.style.top = Math.round(s.rect.top - bounds.top) + 'px';
+      s.el.style.right = 'auto';
+      s.el.style.bottom = 'auto';
+      s.el.style.margin = '0';
+      s.el.style.width = Math.max(12, Math.round(s.rect.width)) + 'px';
+      group.appendChild(s.el);
+    });
+
+    setSelection([group]);
+    syncToHost(true);
+  }
+
+  function ungroupSelected(targetEl) {
+    var group = targetEl || selectedEl;
+    if (!group || isCanvasShell(group) || !document.contains(group)) return;
+    var root = getCanvasRoot();
+    if (!root) return;
+    if (window.getComputedStyle(root).position === 'static') {
+      root.style.position = 'relative';
+    }
+    var rootRect = root.getBoundingClientRect();
+    var parentCs = window.getComputedStyle(group);
+    var parentZ = parseInt(parentCs.zIndex, 10);
+    if (!Number.isFinite(parentZ)) parentZ = 15;
+
+    var children = Array.from(group.children || []).filter(function(c) {
+      if (isEditorNode(c) || isCanvasShell(c)) return false;
+      var t = c.tagName.toLowerCase();
+      return t !== 'script' && t !== 'style' && t !== 'br';
+    });
+    if (children.length === 0) return;
+
+    var childSnapshots = children.map(function(c) {
+      return { el: c, rect: c.getBoundingClientRect(), cs: window.getComputedStyle(c) };
+    });
+
+    // Check whether the container itself has a visible fill or border (e.g. a KPI or Callout card)
+    var bgHex = rgbToHex(parentCs.backgroundColor);
+    var hasBg = Boolean(bgHex && bgHex !== 'transparent');
+    var hasBorder =
+      (parseFloat(parentCs.borderTopWidth) || 0) > 0 ||
+      (parseFloat(parentCs.borderRightWidth) || 0) > 0 ||
+      (parseFloat(parentCs.borderBottomWidth) || 0) > 0 ||
+      (parseFloat(parentCs.borderLeftWidth) || 0) > 0;
+
+    var released = [];
+    childSnapshots.forEach(function(s, idx) {
+      preserveComputedTextStyles(s.el, s.cs);
+      s.el.setAttribute('data-object', 'true');
+      s.el.style.position = 'absolute';
+      s.el.style.display = s.cs.display === 'inline' ? 'inline-block' : s.cs.display;
+      s.el.style.left = Math.round(s.rect.left - rootRect.left) + 'px';
+      s.el.style.top = Math.round(s.rect.top - rootRect.top) + 'px';
+      s.el.style.right = 'auto';
+      s.el.style.bottom = 'auto';
+      s.el.style.margin = '0';
+      s.el.style.width = Math.max(12, Math.round(s.rect.width)) + 'px';
+      s.el.style.zIndex = String(parentZ + idx + 1);
+      root.appendChild(s.el);
+      released.push(s.el);
+    });
+
+    if (hasBg || hasBorder) {
+      // Keep the styled card background intact behind the ungrouped items
+      var groupRect = group.getBoundingClientRect();
+      group.setAttribute('data-object-type', 'shape');
+      if (getOverlayPositionMode(group) !== 'absolute') {
+        group.style.position = 'absolute';
+        group.style.left = Math.round(groupRect.left - rootRect.left) + 'px';
+        group.style.top = Math.round(groupRect.top - rootRect.top) + 'px';
+        group.style.right = 'auto';
+        group.style.bottom = 'auto';
+      }
+      group.style.width = Math.max(16, Math.round(groupRect.width)) + 'px';
+      group.style.height = Math.max(16, Math.round(groupRect.height)) + 'px';
+      group.style.zIndex = String(parentZ);
+    } else {
+      group.remove();
+    }
+
+    setSelection(released);
+    syncToHost(true);
+  }
+
+  function shiftElementBy(el, dx, dy) {
+    if (!el || (dx === 0 && dy === 0)) return;
+    var posMode = getOverlayPositionMode(el);
+    var anchor = getHorizontalAnchor(el);
+    var rect = el.getBoundingClientRect();
+    var rootRect = getCanvasRoot().getBoundingClientRect();
+    if (posMode === 'absolute' || posMode === 'fixed') {
+      if (anchor === 'right') {
+        var curR = Number.isFinite(parseFloat(el.style.right)) ? parseFloat(el.style.right) : rootRect.right - rect.right;
+        el.style.right = Math.round(curR - dx) + 'px';
+      } else {
+        var curL = Number.isFinite(parseFloat(el.style.left)) ? parseFloat(el.style.left) : rect.left - rootRect.left;
+        el.style.left = Math.round(curL + dx) + 'px';
+      }
+      var curT = Number.isFinite(parseFloat(el.style.top)) ? parseFloat(el.style.top) : rect.top - rootRect.top;
+      el.style.top = Math.round(curT + dy) + 'px';
+    } else {
+      ensureMovableInlineOrRelative(el);
+      var relL = parseFloat(el.style.left) || 0;
+      var relT = parseFloat(el.style.top) || 0;
+      el.style.left = Math.round(relL + dx) + 'px';
+      el.style.top = Math.round(relT + dy) + 'px';
+    }
+  }
+
+  function alignSelected(alignment) {
+    var list = selectedEls.filter(function(el) { return el && !isCanvasShell(el) && document.contains(el); });
+    if (list.length === 0) return;
+    var rootRect = getCanvasRoot().getBoundingClientRect();
+
+    if (list.length === 1) {
+      var el = list[0];
+      var r = el.getBoundingClientRect();
+      var marginX = 64;
+      var marginY = 48;
+      var dx = 0;
+      var dy = 0;
+      if (alignment === 'left') dx = (rootRect.left + marginX) - r.left;
+      else if (alignment === 'center-h') dx = (rootRect.left + rootRect.width / 2) - (r.left + r.width / 2);
+      else if (alignment === 'right') dx = (rootRect.right - marginX) - r.right;
+      else if (alignment === 'top') dy = (rootRect.top + marginY) - r.top;
+      else if (alignment === 'center-v') dy = (rootRect.top + rootRect.height / 2) - (r.top + r.height / 2);
+      else if (alignment === 'bottom') dy = (rootRect.bottom - marginY) - r.bottom;
+      shiftElementBy(el, dx, dy);
+    } else {
+      var cb = getCombinedBounds(list);
+      if (!cb) return;
+      var centerX = cb.left + cb.width / 2;
+      var centerY = cb.top + cb.height / 2;
+      list.forEach(function(item) {
+        var r = item.getBoundingClientRect();
+        var dx = 0;
+        var dy = 0;
+        if (alignment === 'left') dx = cb.left - r.left;
+        else if (alignment === 'center-h') dx = centerX - (r.left + r.width / 2);
+        else if (alignment === 'right') dx = cb.right - r.right;
+        else if (alignment === 'top') dy = cb.top - r.top;
+        else if (alignment === 'center-v') dy = centerY - (r.top + r.height / 2);
+        else if (alignment === 'bottom') dy = cb.bottom - r.bottom;
+        shiftElementBy(item, dx, dy);
+      });
+    }
+
+    updateOverlayBoxes();
+    syncToHost(true);
+  }
+
   function reorderZ(direction) {
     if (!selectedEl) return;
     if (getOverlayPositionMode(selectedEl) === 'static') {
@@ -1152,7 +1537,7 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
         return;
       }
 
-      if (dragState && selectedEl) {
+      if (dragState && dragState.items && dragState.items.length > 0) {
         var moveDx = e.clientX - dragState.startX;
         var moveDy = e.clientY - dragState.startY;
         if (!dragState.active && Math.hypot(moveDx, moveDy) < 4) return;
@@ -1209,17 +1594,20 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
 
         showGuides(snappedV, snappedH);
 
-        if (dragState.posMode === 'absolute' || dragState.posMode === 'fixed') {
-          if (dragState.anchor === 'right') {
-            selectedEl.style.right = Math.round(dragState.startRight - appliedDx) + 'px';
+        for (var m = 0; m < dragState.items.length; m++) {
+          var it = dragState.items[m];
+          if (it.posMode === 'absolute' || it.posMode === 'fixed') {
+            if (it.anchor === 'right') {
+              it.el.style.right = Math.round(it.startRight - appliedDx) + 'px';
+            } else {
+              it.el.style.left = Math.round(it.startLeft + appliedDx) + 'px';
+            }
+            it.el.style.top = Math.round(it.startTop + appliedDy) + 'px';
           } else {
-            selectedEl.style.left = Math.round(dragState.startLeft + appliedDx) + 'px';
+            ensureMovableInlineOrRelative(it.el);
+            it.el.style.left = Math.round(it.startLeft + appliedDx) + 'px';
+            it.el.style.top = Math.round(it.startTop + appliedDy) + 'px';
           }
-          selectedEl.style.top = Math.round(dragState.startTop + appliedDy) + 'px';
-        } else {
-          ensureMovableInlineOrRelative(selectedEl);
-          selectedEl.style.left = Math.round(dragState.startLeft + appliedDx) + 'px';
-          selectedEl.style.top = Math.round(dragState.startTop + appliedDy) + 'px';
         }
 
         updateOverlayBoxes();
@@ -1227,8 +1615,8 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
       }
 
       if (editingEl) return;
-      // When hovering inside the already-selected element, keep move cursor without showing hover box
-      if (selectedEl && document.contains(selectedEl) && selectedEl.contains(e.target) && !(e.metaKey || e.ctrlKey)) {
+      // When hovering inside an already-selected element, keep move cursor without showing hover box
+      if (isInsideSelected(e.target) && !(e.metaKey || e.ctrlKey) && !e.shiftKey) {
         setHoveredElement(null);
         return;
       }
@@ -1259,49 +1647,60 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
       }
 
       var deepSelect = Boolean(e.metaKey || e.ctrlKey);
+      var additive = Boolean(e.shiftKey);
 
-      // Step 2: If pressing down on an ALREADY selected element (blue border visible), prepare to move it.
-      if (!deepSelect && selectedEl && document.contains(selectedEl) && selectedEl.contains(e.target)) {
-        var cs = window.getComputedStyle(selectedEl);
-        var rect = selectedEl.getBoundingClientRect();
+      // Step 2: If pressing down on ALREADY selected element(s) without Shift/Ctrl, prepare to move all selected together.
+      if (!deepSelect && !additive && selectedEls.length > 0 && isInsideSelected(e.target)) {
         var rootRect = getCanvasRoot().getBoundingClientRect();
-        var posMode = cs.position;
-        var anchor = getHorizontalAnchor(selectedEl);
+        var liveList = selectedEls.filter(function(el) { return el && document.contains(el); });
+        var combined = getCombinedBounds(liveList);
+        if (!combined) return;
+
+        var items = liveList.map(function(el) {
+          var cs = window.getComputedStyle(el);
+          var rect = el.getBoundingClientRect();
+          var posMode = cs.position;
+          var anchor = getHorizontalAnchor(el);
+          return {
+            el: el,
+            posMode: posMode,
+            anchor: anchor,
+            startLeft: posMode === 'absolute' || posMode === 'fixed'
+              ? (Number.isFinite(parseFloat(el.style.left)) ? parseFloat(el.style.left) : rect.left - rootRect.left)
+              : (parseFloat(el.style.left) || 0),
+            startRight: posMode === 'absolute' || posMode === 'fixed'
+              ? (Number.isFinite(parseFloat(el.style.right)) ? parseFloat(el.style.right) : rootRect.right - rect.right)
+              : 0,
+            startTop: posMode === 'absolute' || posMode === 'fixed'
+              ? (Number.isFinite(parseFloat(el.style.top)) ? parseFloat(el.style.top) : rect.top - rootRect.top)
+              : (parseFloat(el.style.top) || 0)
+          };
+        });
 
         dragState = {
           startX: e.clientX,
           startY: e.clientY,
-          startRectLeft: rect.left,
-          startRectTop: rect.top,
-          startW: rect.width,
-          startH: rect.height,
-          startLeft: posMode === 'absolute' || posMode === 'fixed'
-            ? (Number.isFinite(parseFloat(selectedEl.style.left)) ? parseFloat(selectedEl.style.left) : rect.left - rootRect.left)
-            : (parseFloat(selectedEl.style.left) || 0),
-          startRight: posMode === 'absolute' || posMode === 'fixed'
-            ? (Number.isFinite(parseFloat(selectedEl.style.right)) ? parseFloat(selectedEl.style.right) : rootRect.right - rect.right)
-            : 0,
-          startTop: posMode === 'absolute' || posMode === 'fixed'
-            ? (Number.isFinite(parseFloat(selectedEl.style.top)) ? parseFloat(selectedEl.style.top) : rect.top - rootRect.top)
-            : (parseFloat(selectedEl.style.top) || 0),
-          posMode: posMode,
-          anchor: anchor,
-          snap: getSnapTargets(selectedEl),
+          startRectLeft: combined.left,
+          startRectTop: combined.top,
+          startW: combined.width,
+          startH: combined.height,
+          items: items,
+          snap: getSnapTargets(liveList[0]),
           active: false
         };
         return;
       }
 
-      // Step 1: Clicking an UNSELECTED element ONLY selects it (shows blue border) — never drags on first click.
+      // Step 1: Clicking an UNSELECTED element ONLY selects it (or Shift+Click toggles multi-selection) — never drags on first click.
       var target = deepSelect
         ? (!isEditorNode(e.target) && !isCanvasShell(e.target) ? e.target : null)
         : resolveClickableTarget(e.target, false);
       dragState = null;
       if (!target) {
-        selectElement(null);
+        if (!additive) selectElement(null);
         return;
       }
-      selectElement(target);
+      selectElement(target, additive);
     }, true);
 
     function finishPointerInteraction() {
@@ -1368,7 +1767,7 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
         return;
       }
 
-      if (!selectedEl) return;
+      if (selectedEls.length === 0) return;
 
       if (e.key === 'Escape') {
         e.preventDefault();
@@ -1377,7 +1776,15 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
         return;
       }
 
-      if (e.key === 'Enter' && canEditTextDirectly(selectedEl)) {
+      if (mod && e.key.toLowerCase() === 'g') {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.shiftKey) ungroupSelected();
+        else groupSelected();
+        return;
+      }
+
+      if (e.key === 'Enter' && selectedEl && canEditTextDirectly(selectedEl)) {
         e.preventDefault();
         e.stopPropagation();
         startInlineEditing(selectedEl);
@@ -1391,7 +1798,7 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
         return;
       }
 
-      if (mod && e.key.toLowerCase() === 'd') {
+      if (mod && e.key.toLowerCase() === 'd' && selectedEl) {
         e.preventDefault();
         e.stopPropagation();
         duplicateSelected();
@@ -1402,36 +1809,9 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
       if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].indexOf(e.key) !== -1) {
         e.preventDefault();
         e.stopPropagation();
-        var posMode = getOverlayPositionMode(selectedEl);
-        var anchor = getHorizontalAnchor(selectedEl);
-        var rect = selectedEl.getBoundingClientRect();
-        var rootRect = getCanvasRoot().getBoundingClientRect();
-        if (posMode === 'static' || posMode === 'relative') {
-          ensureMovableInlineOrRelative(selectedEl);
-        }
-
-        var curLeft = posMode === 'absolute' || posMode === 'fixed'
-          ? (Number.isFinite(parseFloat(selectedEl.style.left)) ? parseFloat(selectedEl.style.left) : rect.left - rootRect.left)
-          : (parseFloat(selectedEl.style.left) || 0);
-        var curRight = posMode === 'absolute' || posMode === 'fixed'
-          ? (Number.isFinite(parseFloat(selectedEl.style.right)) ? parseFloat(selectedEl.style.right) : rootRect.right - rect.right)
-          : 0;
-        var curTop = posMode === 'absolute' || posMode === 'fixed'
-          ? (Number.isFinite(parseFloat(selectedEl.style.top)) ? parseFloat(selectedEl.style.top) : rect.top - rootRect.top)
-          : (parseFloat(selectedEl.style.top) || 0);
-
-        if (e.key === 'ArrowLeft') {
-          if (anchor === 'right' && (posMode === 'absolute' || posMode === 'fixed')) selectedEl.style.right = Math.round(curRight + step) + 'px';
-          else selectedEl.style.left = Math.round(curLeft - step) + 'px';
-        } else if (e.key === 'ArrowRight') {
-          if (anchor === 'right' && (posMode === 'absolute' || posMode === 'fixed')) selectedEl.style.right = Math.round(curRight - step) + 'px';
-          else selectedEl.style.left = Math.round(curLeft + step) + 'px';
-        } else if (e.key === 'ArrowUp') {
-          selectedEl.style.top = Math.round(curTop - step) + 'px';
-        } else if (e.key === 'ArrowDown') {
-          selectedEl.style.top = Math.round(curTop + step) + 'px';
-        }
-
+        var ndx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
+        var ndy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
+        selectedEls.forEach(function(item) { shiftElementBy(item, ndx, ndy); });
         updateOverlayBoxes();
         syncToHost(true);
       }
@@ -1448,7 +1828,7 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
           selectElement(null);
         } else {
           var target = document.querySelector('[data-sl-id="' + cmd.id + '"]');
-          if (target) selectElement(target);
+          if (target) selectElement(target, Boolean(cmd.additive));
         }
       } else if (cmd.type === 'select-parent') {
         if (selectedEl && selectedEl.parentElement && !isCanvasShell(selectedEl.parentElement)) {
@@ -1468,6 +1848,13 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
       } else if (cmd.type === 'make-absolute') {
         var elToFree = cmd.id ? document.querySelector('[data-sl-id="' + cmd.id + '"]') : selectedEl;
         if (elToFree) makeElementFreePosition(elToFree);
+      } else if (cmd.type === 'group-selected') {
+        groupSelected();
+      } else if (cmd.type === 'ungroup-selected') {
+        var elToUngroup = cmd.id ? document.querySelector('[data-sl-id="' + cmd.id + '"]') : selectedEl;
+        if (elToUngroup) ungroupSelected(elToUngroup);
+      } else if (cmd.type === 'align-selected') {
+        alignSelected(cmd.alignment);
       } else if (cmd.type === 'insert-element') {
         insertNewElement(cmd.elementType, cmd.imgSrc, cmd.imgAlt);
       } else if (cmd.type === 'set-slide-dir') {

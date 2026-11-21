@@ -1,7 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AlignLeft,
   ArrowDown,
+  ArrowRight,
   ArrowUp,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Code2,
@@ -10,10 +13,14 @@ import {
   Eye,
   EyeOff,
   FileCode2,
+  Group,
+  Hash,
   Image as ImageIcon,
   Laptop,
+  List,
   Magnet,
   Maximize2,
+  MessageSquareQuote,
   Minimize2,
   Minus,
   Moon,
@@ -27,9 +34,11 @@ import {
   Square,
   Sun,
   Tablet,
+  Tag,
   Trash2,
   Type,
   Undo2,
+  Ungroup,
   Upload,
   ZoomIn,
   ZoomOut,
@@ -39,6 +48,8 @@ import {
   Deck,
   DevicePreview,
   EditorCommand,
+  InsertElementType,
+  MultiSelectionSummary,
   SelectedElementInfo,
   Slide,
   SlideLayerItem,
@@ -114,8 +125,10 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
   const [devicePreview, setDevicePreview] = useState<DevicePreview>('desktop');
   const [slideSearch, setSlideSearch] = useState('');
   const [templateMenuOpen, setTemplateMenuOpen] = useState(false);
+  const [insertMenuOpen, setInsertMenuOpen] = useState(false);
 
   const [selectedElement, setSelectedElement] = useState<SelectedElementInfo | null>(null);
+  const [multiSelection, setMultiSelection] = useState<MultiSelectionSummary | null>(null);
   const [layers, setLayers] = useState<SlideLayerItem[]>([]);
   const [slideDir, setSlideDir] = useState<'ltr' | 'rtl'>('ltr');
   const [availableFonts, setAvailableFonts] = useState<string[]>([]);
@@ -123,6 +136,7 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
 
   const stageFrameRef = useRef<SlideFrameHandle>(null);
   const quickImageInputRef = useRef<HTMLInputElement>(null);
+  const insertMenuRef = useRef<HTMLDivElement>(null);
   const panelResizeStartRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const historyMapRef = useRef<Record<string, SlideHistoryStack>>({});
   const lastCommittedHtmlRef = useRef<Record<string, SlideEditSnapshot>>({});
@@ -144,12 +158,32 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
   // Clear selection and any pending debounced code history timer when switching slides or leaving edit mode
   useEffect(() => {
     setSelectedElement(null);
+    setMultiSelection(null);
     setLayers([]);
+    setInsertMenuOpen(false);
     if (codeHistoryTimerRef.current) {
       window.clearTimeout(codeHistoryTimerRef.current);
       codeHistoryTimerRef.current = null;
     }
   }, [activeSlide.id, editMode]);
+
+  useEffect(() => {
+    if (!insertMenuOpen) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (insertMenuRef.current && !insertMenuRef.current.contains(e.target as Node)) {
+        setInsertMenuOpen(false);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setInsertMenuOpen(false);
+    };
+    window.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [insertMenuOpen]);
 
   useEffect(() => {
     return () => {
@@ -202,6 +236,7 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
     });
     lastCommittedHtmlRef.current[activeSlide.id] = previous;
     setSelectedElement(null);
+    setMultiSelection(null);
     onUpdateSlide(activeSlide.id, {
       html: previous.html,
       css: previous.css,
@@ -232,6 +267,7 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
     });
     lastCommittedHtmlRef.current[activeSlide.id] = next;
     setSelectedElement(null);
+    setMultiSelection(null);
     onUpdateSlide(activeSlide.id, {
       html: next.html,
       css: next.css,
@@ -440,9 +476,30 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
     e.target.value = '';
   };
 
-  const handleElementSelect = useCallback((element: SelectedElementInfo | null) => {
-    setSelectedElement(element);
-  }, []);
+  const handleElementSelect = useCallback(
+    (element: SelectedElementInfo | null, multi: MultiSelectionSummary | null) => {
+      setSelectedElement(element);
+      setMultiSelection(multi);
+    },
+    []
+  );
+
+  const quickObjectMenuItems: {
+    type: InsertElementType;
+    label: string;
+    detail: string;
+    icon: React.ElementType;
+  }[] = [
+    { type: 'heading', label: 'Heading', detail: 'Bold slide title', icon: Type },
+    { type: 'text', label: 'Text Block', detail: 'Editable paragraph', icon: AlignLeft },
+    { type: 'bullets', label: 'Bullet List', detail: 'Key takeaways list', icon: List },
+    { type: 'kpi', label: 'KPI Metric Card', detail: 'Big number + label', icon: Hash },
+    { type: 'callout', label: 'Callout Box', detail: 'Highlighted quote / note', icon: MessageSquareQuote },
+    { type: 'badge', label: 'Tag / Label', detail: 'Inline status badge', icon: Tag },
+    { type: 'shape', label: 'Card / Shape', detail: 'Rounded container box', icon: Square },
+    { type: 'divider', label: 'Accent Bar', detail: 'Divider line', icon: Minus },
+    { type: 'arrow', label: 'Arrow', detail: 'Directional connector', icon: ArrowRight },
+  ];
 
   const handleLayersChange = useCallback(
     (nextLayers: SlideLayerItem[], dir: 'ltr' | 'rtl', fonts: string[]) => {
@@ -948,17 +1005,6 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
                   <Square className="w-3.5 h-3.5" aria-hidden="true" />
                   <span className="hidden xl:inline">Shape</span>
                 </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    handleSendEditorCommand({ type: 'insert-element', elementType: 'divider' })
-                  }
-                  className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-medium text-slate-700 dark:text-slate-200 whitespace-nowrap shrink-0 cursor-pointer"
-                  title="Insert accent divider bar"
-                >
-                  <Minus className="w-3.5 h-3.5" aria-hidden="true" />
-                  <span className="hidden xl:inline">Divider</span>
-                </button>
                 <input
                   ref={quickImageInputRef}
                   type="file"
@@ -975,6 +1021,86 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
                   <ImageIcon className="w-3.5 h-3.5" aria-hidden="true" />
                   <span className="hidden xl:inline">Image</span>
                 </button>
+
+                {/* Ready-to-Use Presentation Objects Popover */}
+                <div ref={insertMenuRef} className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setInsertMenuOpen((v) => !v)}
+                    aria-expanded={insertMenuOpen}
+                    aria-haspopup="menu"
+                    className={`h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg border text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                      insertMenuOpen
+                        ? 'border-blue-600/40 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300'
+                        : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800'
+                    }`}
+                    title="Insert ready-made slide objects (Bullet List, KPI Card, Callout, Tag, Arrow...)"
+                  >
+                    <Plus className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>Objects</span>
+                    <ChevronDown className="w-3 h-3 opacity-70" aria-hidden="true" />
+                  </button>
+
+                  {insertMenuOpen && (
+                    <div
+                      role="menu"
+                      className="absolute right-0 mt-1.5 w-60 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-lg py-1.5 z-40"
+                    >
+                      <div className="px-3 py-1.5 text-[11px] font-medium text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-800">
+                        Insert Presentation Object
+                      </div>
+                      {quickObjectMenuItems.map(({ type, label, detail, icon: Icon }) => (
+                        <button
+                          key={type}
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            handleSendEditorCommand({ type: 'insert-element', elementType: type });
+                            setInsertMenuOpen(false);
+                          }}
+                          className="w-full text-left px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors flex items-center gap-2.5 cursor-pointer"
+                        >
+                          <Icon className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400 shrink-0" aria-hidden="true" />
+                          <div className="min-w-0">
+                            <div className="text-xs font-medium text-slate-900 dark:text-slate-100 leading-tight">
+                              {label}
+                            </div>
+                            <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                              {detail}
+                            </div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Contextual Group / Ungroup Quick Action */}
+                {multiSelection && multiSelection.count > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => handleSendEditorCommand({ type: 'group-selected' })}
+                    className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                    title="Group selected objects (Ctrl/Cmd+G)"
+                  >
+                    <Group className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>Group ({multiSelection.count})</span>
+                  </button>
+                )}
+
+                {selectedElement?.canUngroup && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleSendEditorCommand({ type: 'ungroup-selected', id: selectedElement.id })
+                    }
+                    className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50/70 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 hover:bg-blue-100/80 dark:hover:bg-blue-950/70 text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                    title="Ungroup selected container (Ctrl/Cmd+Shift+G)"
+                  >
+                    <Ungroup className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>Ungroup</span>
+                  </button>
+                )}
 
                 <span className="w-px h-4 bg-slate-200 dark:bg-slate-800 mx-0.5" aria-hidden="true" />
 
@@ -1076,9 +1202,11 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
               <span aria-hidden="true" className="hidden md:inline">·</span>
               <span className="hidden md:inline whitespace-nowrap truncate">
                 {editMode
-                  ? selectedElement
-                    ? `Selected: ${selectedElement.friendlyName} · Drag to move`
-                    : 'Click to select · Drag selected to move'
+                  ? multiSelection && multiSelection.count > 1
+                    ? `${multiSelection.count} objects selected · Drag to move · Ctrl+G to group`
+                    : selectedElement
+                    ? `Selected: ${selectedElement.friendlyName} · Drag to move · Shift+Click to add`
+                    : 'Click to select · Shift+Click multiple to group'
                   : activeTheme.name}
               </span>
             </div>
@@ -1236,6 +1364,7 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
                   slideDir={slideDir}
                   availableFonts={availableFonts}
                   selectedElement={selectedElement}
+                  multiSelection={multiSelection}
                   layers={layers}
                   onEnableEditMode={() => setEditMode(true)}
                   onUpdateSlide={(patch) => handleSlideFieldUpdateWithHistory(patch, true)}

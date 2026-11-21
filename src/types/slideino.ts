@@ -121,7 +121,25 @@ export const ASPECT_RATIO_DIMENSIONS: Record<
   '9:16': { width: 720, height: 1280, label: '9:16 Vertical' },
 };
 
-export type InsertElementType = 'heading' | 'text' | 'shape' | 'divider' | 'image';
+export type InsertElementType =
+  | 'heading'
+  | 'text'
+  | 'bullets'
+  | 'kpi'
+  | 'callout'
+  | 'badge'
+  | 'shape'
+  | 'divider'
+  | 'arrow'
+  | 'image';
+
+export type AlignAction = 'left' | 'center-h' | 'right' | 'top' | 'center-v' | 'bottom';
+
+export interface MultiSelectionSummary {
+  count: number;
+  ids: string[];
+  labels: string[];
+}
 
 export interface SlideLayerItem {
   id: string;
@@ -138,6 +156,7 @@ export interface SelectedElementInfo {
   label: string;
   kind: 'text' | 'image' | 'shape' | 'container';
   hasParent: boolean;
+  canUngroup: boolean;
   hasText: boolean;
   isTextEditable: boolean;
   textContent: string;
@@ -200,13 +219,16 @@ export interface ElementStylePatch {
 }
 
 export type EditorCommand =
-  | { type: 'select-element'; id: string | null }
+  | { type: 'select-element'; id: string | null; additive?: boolean }
   | { type: 'select-parent' }
   | { type: 'update-element'; id: string; patch: ElementStylePatch }
   | { type: 'delete-selected' }
   | { type: 'duplicate-selected' }
   | { type: 'reorder-z'; direction: 'forward' | 'backward' | 'front' | 'back' }
   | { type: 'make-absolute'; id?: string }
+  | { type: 'group-selected' }
+  | { type: 'ungroup-selected'; id?: string }
+  | { type: 'align-selected'; alignment: AlignAction }
   | { type: 'insert-element'; elementType: InsertElementType; imgSrc?: string; imgAlt?: string }
   | { type: 'set-slide-dir'; dir: 'ltr' | 'rtl' }
   | { type: 'set-snap'; enabled: boolean }
