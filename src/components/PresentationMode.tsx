@@ -11,7 +11,6 @@ import {
   Maximize2,
   Minimize2,
   MonitorOff,
-  MousePointer2,
   NotebookPen,
   Pause,
   Pen,
@@ -30,6 +29,7 @@ import {
   ANNOTATION_SIZES,
   AnnotationStroke,
   AnnotationTool,
+  LASER_COLORS,
   PresentationAnnotationLayer,
 } from './PresentationAnnotationLayer';
 
@@ -45,6 +45,51 @@ function formatTimer(totalSeconds: number): string {
   const secs = totalSeconds % 60;
   return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
+
+/**
+ * Isolated timer component so the 1-second tick never re-renders the main PresentationMode stage,
+ * SlideFrame, or high-frequency Laser/Drawing canvas.
+ */
+const PresenterTimer: React.FC = React.memo(() => {
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [timerRunning, setTimerRunning] = useState(true);
+
+  useEffect(() => {
+    if (!timerRunning) return;
+    const id = window.setInterval(() => setElapsedSeconds((s) => s + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [timerRunning]);
+
+  return (
+    <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between gap-3">
+      <div className="flex items-center gap-2.5">
+        <Clock className="w-4 h-4 text-slate-400" aria-hidden="true" />
+        <span className="font-mono text-2xl font-semibold tabular-nums text-white">
+          {formatTimer(elapsedSeconds)}
+        </span>
+      </div>
+      <div className="flex items-center gap-1.5">
+        <button
+          type="button"
+          onClick={() => setTimerRunning((v) => !v)}
+          className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 cursor-pointer"
+          aria-label={timerRunning ? 'Pause timer' : 'Resume timer'}
+        >
+          {timerRunning ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+        </button>
+        <button
+          type="button"
+          onClick={() => setElapsedSeconds(0)}
+          className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 cursor-pointer"
+          aria-label="Reset timer"
+        >
+          <RotateCcw className="w-4 h-4" />
+        </button>
+      </div>
+    </div>
+  );
+});
+PresenterTimer.displayName = 'PresenterTimer';
 
 export const PresentationMode: React.FC<PresentationModeProps> = ({
   deck,
@@ -66,14 +111,11 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
   const [controlsVisible, setControlsVisible] = useState(true);
   const [noteFontSize, setNoteFontSize] = useState(16);
 
-  // Presenter timer
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [timerRunning, setTimerRunning] = useState(true);
-
   // Annotation & laser pointer state (stored per slide so navigating preserves drawings)
   const [activeTool, setActiveTool] = useState<AnnotationTool>('pointer');
   const [lastDrawTool, setLastDrawTool] = useState<Exclude<AnnotationTool, 'pointer' | 'laser'>>('pen');
   const [strokeColor, setStrokeColor] = useState<string>(ANNOTATION_COLORS[0].value);
+  const [laserColor, setLaserColor] = useState<string>(LASER_COLORS[0].value);
   const [strokeSize, setStrokeSize] = useState<number>(ANNOTATION_SIZES[1].value);
   const [annotationsBySlide, setAnnotationsBySlide] = useState<Record<string, AnnotationStroke[]>>({});
   const [undoHistoryBySlide, setUndoHistoryBySlide] = useState<Record<string, AnnotationStroke[][]>>({});
@@ -81,6 +123,10 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
   const rootRef = useRef<HTMLDivElement>(null);
   const hideTimerRef = useRef<number | null>(null);
   const dockHoveredRef = useRef(false);
+  const controlsVisibleRef = useRef(true);
+  const lastBumpRef = useRef(0);
+  const activeToolRef = useRef<AnnotationTool>('pointer');
+  activeToolRef.current = activeTool;
   const touchStartXRef = useRef<number | null>(null);
 
   const currentSlide = slides[currentIndex] || slides[0];
@@ -122,24 +168,42 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
     return () => document.removeEventListener('fullscreenchange', onFsChange);
   }, []);
 
-  useEffect(() => {
-    if (!timerRunning) return;
-    const id = window.setInterval(() => setElapsedSeconds((s) => s + 1), 1000);
-    return () => window.clearInterval(id);
-  }, [timerRunning]);
-
-  const bumpControls = useCallback(() => {
-    setControlsVisible(true);
+  const bumpControls = useCallback((force = false) => {
+    const now = performance.now();
+    if (!force && controlsVisibleRef.current && now - lastBumpRef.current < 300) {
+      return;
+    }
+    lastBumpRef.current = now;
+    if (!controlsVisibleRef.current) {
+      controlsVisibleRef.current = true;
+      setControlsVisible(true);
+    }
     if (hideTimerRef.current) window.clearTimeout(hideTimerRef.current);
     hideTimerRef.current = window.setTimeout(() => {
       if (!dockHoveredRef.current) {
+        controlsVisibleRef.current = false;
         setControlsVisible(false);
       }
-    }, 3200);
+    }, 3000);
   }, []);
 
+  const handleStageMouseMove = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      // While using Laser or Drawing tools, avoid popping up the dock on every slide pointer move;
+      // bring it back smoothly whenever the cursor approaches the bottom dock area.
+      if (activeToolRef.current !== 'pointer') {
+        if (window.innerHeight - e.clientY <= 136) {
+          bumpControls(false);
+        }
+        return;
+      }
+      bumpControls(false);
+    },
+    [bumpControls]
+  );
+
   useEffect(() => {
-    bumpControls();
+    bumpControls(true);
     return () => {
       if (hideTimerRef.current) window.clearTimeout(hideTimerRef.current);
     };
@@ -151,7 +215,7 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
       if (next !== 'pointer' && next !== 'laser') {
         setLastDrawTool(next);
       }
-      bumpControls();
+      bumpControls(true);
     },
     [bumpControls]
   );
@@ -314,31 +378,42 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
     if (Math.abs(dx) > 48) {
       step(dx < 0 ? 1 : -1);
     } else {
-      bumpControls();
+      bumpControls(true);
     }
   };
 
-  const annotationOverlay = (
-    <PresentationAnnotationLayer
-      tool={activeTool}
-      color={strokeColor}
-      strokeSize={strokeSize}
-      annotations={currentAnnotations}
-      onCommitStroke={handleCommitStroke}
-      onEraseStrokeIds={handleEraseStrokeIds}
-      onUserActivity={bumpControls}
-    />
+  const annotationOverlay = useMemo(
+    () => (
+      <PresentationAnnotationLayer
+        tool={activeTool}
+        color={strokeColor}
+        laserColor={laserColor}
+        strokeSize={strokeSize}
+        annotations={currentAnnotations}
+        onCommitStroke={handleCommitStroke}
+        onEraseStrokeIds={handleEraseStrokeIds}
+      />
+    ),
+    [
+      activeTool,
+      strokeColor,
+      laserColor,
+      strokeSize,
+      currentAnnotations,
+      handleCommitStroke,
+      handleEraseStrokeIds,
+    ]
   );
 
+  const isLaserActive = activeTool === 'laser';
   const isDrawingToolActive = activeTool !== 'pointer' && activeTool !== 'laser';
-  const showAnnotationTray = activeTool !== 'pointer';
 
   const progressPct = ((currentIndex + 1) / slides.length) * 100;
 
   return (
     <div
       ref={rootRef}
-      onMouseMove={bumpControls}
+      onMouseMove={handleStageMouseMove}
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
       className="fixed inset-0 z-50 bg-slate-950 text-slate-100 flex flex-col select-none"
@@ -377,39 +452,14 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
                 sharedCss={deck.sharedCss}
                 aspectRatio={deck.aspectRatio}
                 overlay={annotationOverlay}
-                onForwardKey={(key) => handleKeyAction(key)}
+                onForwardKey={handleKeyAction}
               />
             </div>
           </div>
 
           <div className="lg:col-span-4 flex flex-col gap-4 min-h-0">
-            {/* Timer Bar */}
-            <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2.5">
-                <Clock className="w-4 h-4 text-slate-400" aria-hidden="true" />
-                <span className="font-mono text-2xl font-semibold tabular-nums text-white">
-                  {formatTimer(elapsedSeconds)}
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => setTimerRunning((v) => !v)}
-                  className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 cursor-pointer"
-                  aria-label={timerRunning ? 'Pause timer' : 'Resume timer'}
-                >
-                  {timerRunning ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setElapsedSeconds(0)}
-                  className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 cursor-pointer"
-                  aria-label="Reset timer"
-                >
-                  <RotateCcw className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
+            {/* Isolated Presenter Timer (zero stage re-renders on 1s tick) */}
+            <PresenterTimer />
 
             {/* Next Slide Preview */}
             <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 flex flex-col gap-2">
@@ -477,7 +527,7 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
             sharedCss={deck.sharedCss}
             aspectRatio={deck.aspectRatio}
             overlay={annotationOverlay}
-            onForwardKey={(key) => handleKeyAction(key)}
+            onForwardKey={handleKeyAction}
           />
           {blackout && (
             <div
@@ -490,43 +540,84 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
         </div>
       )}
 
-      {/* Floating Accessible Control Bar & Annotation Palette */}
+      {/* Floating Accessible Control Bar & Separate Contextual Sub-Bars */}
       <div
         onMouseEnter={() => {
           dockHoveredRef.current = true;
-          setControlsVisible(true);
+          if (!controlsVisibleRef.current) {
+            controlsVisibleRef.current = true;
+            setControlsVisible(true);
+          }
         }}
         onMouseLeave={() => {
           dockHoveredRef.current = false;
-          bumpControls();
+          bumpControls(true);
         }}
-        className={`fixed bottom-4 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-2 max-w-[96vw] transition-opacity duration-200 ${
+        className={`fixed bottom-3 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-1.5 max-w-[96vw] transition-opacity duration-200 ${
           controlsVisible || presenterView ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
       >
-        {/* Contextual Drawing & Laser Toolbar (shown while annotating or pointing) */}
-        {showAnnotationTray && (
+        {/* 1. Separate Compact Laser Color Bar (shown only when Laser is active) */}
+        {isLaserActive && (
           <div
             role="toolbar"
-            aria-label="Drawing and laser tools"
-            className="flex flex-wrap items-center justify-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-900/95 border border-slate-700/80 backdrop-blur-md shadow-xl"
+            aria-label="Laser pointer options"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-900/95 border border-slate-700/80 backdrop-blur-md shadow-xl"
+          >
+            <span className="text-[11px] font-medium text-slate-400 pr-0.5 whitespace-nowrap">
+              Laser
+            </span>
+            <div className="flex items-center gap-1.5" role="group" aria-label="Laser color">
+              {LASER_COLORS.map((swatch) => {
+                const isSelected = laserColor === swatch.value;
+                return (
+                  <button
+                    key={swatch.id}
+                    type="button"
+                    onClick={() => setLaserColor(swatch.value)}
+                    aria-label={swatch.label}
+                    aria-pressed={isSelected}
+                    title={swatch.label}
+                    className={`w-4 h-4 rounded-full border border-white/30 transition-transform cursor-pointer shrink-0 ${
+                      isSelected
+                        ? 'scale-115 ring-2 ring-white ring-offset-1 ring-offset-slate-900'
+                        : 'hover:scale-110'
+                    }`}
+                    style={{ backgroundColor: swatch.value }}
+                  />
+                );
+              })}
+            </div>
+            <span className="w-px h-4 bg-slate-700 mx-0.5" aria-hidden="true" />
+            <button
+              type="button"
+              onClick={() => selectTool('pointer')}
+              className="w-6 h-6 inline-flex items-center justify-center rounded-md text-slate-400 hover:bg-slate-800 hover:text-white cursor-pointer shrink-0"
+              aria-label="Turn off laser (Esc)"
+              title="Turn Off Laser (Esc)"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
+        {/* 2. Separate Compact Drawing Bar (no redundant Laser/Pointer buttons) */}
+        {isDrawingToolActive && (
+          <div
+            role="toolbar"
+            aria-label="Drawing tools"
+            className="flex flex-wrap items-center justify-center gap-1 px-2 py-1 rounded-xl bg-slate-900/95 border border-slate-700/80 backdrop-blur-md shadow-xl"
           >
             {(
               [
-                { id: 'pointer', icon: MousePointer2, label: 'Pointer (V / Esc)' },
-                { id: 'laser', icon: Radio, label: 'Laser Pointer (L)' },
                 { id: 'pen', icon: Pen, label: 'Pen (P)' },
                 { id: 'highlighter', icon: Highlighter, label: 'Highlighter (H)' },
                 { id: 'arrow', icon: ArrowUpRight, label: 'Arrow (A, hold Shift to snap)' },
-                { id: 'rect', icon: Square, label: 'Box / Rectangle (R, hold Shift for square)' },
+                { id: 'rect', icon: Square, label: 'Box (R, hold Shift for square)' },
                 { id: 'eraser', icon: Eraser, label: 'Stroke Eraser (E)' },
               ] as const
             ).map(({ id, icon: Icon, label }) => {
               const isSelected = activeTool === id;
-              const activeStyle =
-                id === 'laser'
-                  ? 'bg-red-600 text-white'
-                  : 'bg-blue-600 text-white';
               return (
                 <button
                   key={id}
@@ -535,30 +626,23 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
                   aria-label={label}
                   aria-pressed={isSelected}
                   title={label}
-                  className={`w-8 h-8 inline-flex items-center justify-center rounded-lg transition-colors cursor-pointer shrink-0 ${
+                  className={`w-7 h-7 inline-flex items-center justify-center rounded-lg transition-colors cursor-pointer shrink-0 ${
                     isSelected
-                      ? activeStyle
+                      ? 'bg-blue-600 text-white'
                       : 'text-slate-300 hover:bg-slate-800 hover:text-white'
                   }`}
                 >
-                  <Icon className="w-4 h-4" />
+                  <Icon className="w-3.5 h-3.5" />
                 </button>
               );
             })}
 
             {activeTool !== 'eraser' && (
               <>
-                <span className="w-px h-5 bg-slate-700 mx-1" aria-hidden="true" />
-                <div className="flex items-center gap-1.5 px-1" role="group" aria-label="Ink color">
+                <span className="w-px h-4 bg-slate-700 mx-0.5" aria-hidden="true" />
+                <div className="flex items-center gap-1 px-0.5" role="group" aria-label="Ink color">
                   {ANNOTATION_COLORS.map((swatch) => {
                     const isColorActive = strokeColor === swatch.value;
-                    // For laser mode, hide charcoal/white since laser needs vivid glow colors
-                    if (
-                      activeTool === 'laser' &&
-                      (swatch.id === 'ink' || swatch.id === 'white')
-                    ) {
-                      return null;
-                    }
                     return (
                       <button
                         key={swatch.id}
@@ -567,9 +651,9 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
                         aria-label={swatch.label}
                         aria-pressed={isColorActive}
                         title={swatch.label}
-                        className={`w-5 h-5 rounded-full border border-white/25 transition-transform cursor-pointer shrink-0 ${
+                        className={`w-4 h-4 rounded-full border border-white/25 transition-transform cursor-pointer shrink-0 ${
                           isColorActive
-                            ? 'scale-110 ring-2 ring-white ring-offset-2 ring-offset-slate-900'
+                            ? 'scale-115 ring-2 ring-white ring-offset-1 ring-offset-slate-900'
                             : 'hover:scale-110'
                         }`}
                         style={{ backgroundColor: swatch.value }}
@@ -577,16 +661,12 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
                     );
                   })}
                 </div>
-              </>
-            )}
 
-            {isDrawingToolActive && activeTool !== 'eraser' && (
-              <>
-                <span className="w-px h-5 bg-slate-700 mx-1" aria-hidden="true" />
+                <span className="w-px h-4 bg-slate-700 mx-0.5" aria-hidden="true" />
                 <div className="flex items-center gap-0.5" role="group" aria-label="Stroke width">
                   {ANNOTATION_SIZES.map((sz) => {
                     const isActive = strokeSize === sz.value;
-                    const dotPx = sz.id === 'sm' ? 4 : sz.id === 'md' ? 7 : 10;
+                    const dotPx = sz.id === 'sm' ? 4 : sz.id === 'md' ? 6.5 : 9;
                     return (
                       <button
                         key={sz.id}
@@ -595,7 +675,7 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
                         aria-label={`${sz.label} stroke`}
                         aria-pressed={isActive}
                         title={`${sz.label} stroke`}
-                        className={`w-7 h-7 inline-flex items-center justify-center rounded-md transition-colors cursor-pointer ${
+                        className={`w-6 h-6 inline-flex items-center justify-center rounded-md transition-colors cursor-pointer ${
                           isActive
                             ? 'bg-slate-700 text-white'
                             : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
@@ -612,47 +692,57 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
               </>
             )}
 
-            <span className="w-px h-5 bg-slate-700 mx-1" aria-hidden="true" />
+            <span className="w-px h-4 bg-slate-700 mx-0.5" aria-hidden="true" />
 
             <button
               type="button"
               onClick={handleUndoAnnotation}
               disabled={!canUndoAnnotation}
-              className="w-8 h-8 inline-flex items-center justify-center rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white disabled:opacity-35 disabled:pointer-events-none cursor-pointer shrink-0"
+              className="w-7 h-7 inline-flex items-center justify-center rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white disabled:opacity-35 disabled:pointer-events-none cursor-pointer shrink-0"
               aria-label="Undo drawing (Ctrl+Z)"
               title="Undo Drawing (Ctrl/Cmd+Z)"
             >
-              <Undo2 className="w-4 h-4" />
+              <Undo2 className="w-3.5 h-3.5" />
             </button>
 
             <button
               type="button"
               onClick={handleClearSlideAnnotations}
               disabled={currentAnnotations.length === 0}
-              className="w-8 h-8 inline-flex items-center justify-center rounded-lg text-slate-300 hover:bg-red-950/70 hover:text-red-300 disabled:opacity-35 disabled:pointer-events-none cursor-pointer shrink-0"
+              className="w-7 h-7 inline-flex items-center justify-center rounded-lg text-slate-300 hover:bg-red-950/70 hover:text-red-300 disabled:opacity-35 disabled:pointer-events-none cursor-pointer shrink-0"
               aria-label="Clear drawings on this slide (C)"
               title="Clear Slide Drawings (C)"
             >
-              <Trash2 className="w-4 h-4" />
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => selectTool('pointer')}
+              className="w-7 h-7 inline-flex items-center justify-center rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white cursor-pointer shrink-0"
+              aria-label="Done drawing (Esc)"
+              title="Done Drawing (Esc)"
+            >
+              <X className="w-3.5 h-3.5" />
             </button>
           </div>
         )}
 
         <nav
           aria-label="Presentation controls"
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/92 border border-slate-700/70 backdrop-blur-md shadow-xl"
+          className="flex items-center gap-0.5 sm:gap-1 px-2 sm:px-2.5 py-1 rounded-xl bg-slate-900/92 border border-slate-700/70 backdrop-blur-md shadow-xl overflow-x-auto max-w-full"
         >
           <button
             type="button"
             onClick={() => step(-1)}
             disabled={currentIndex === 0}
-            className="w-10 h-10 inline-flex items-center justify-center rounded-lg text-slate-200 hover:bg-slate-800 disabled:opacity-35 cursor-pointer"
+            className="w-8 h-8 sm:w-9 sm:h-9 inline-flex items-center justify-center rounded-lg text-slate-200 hover:bg-slate-800 disabled:opacity-35 cursor-pointer shrink-0"
             aria-label="Previous slide"
           >
-            <ChevronLeft className="w-5 h-5" />
+            <ChevronLeft className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
 
-          <span className="px-2 font-mono text-xs tabular-nums text-slate-200 whitespace-nowrap">
+          <span className="px-1.5 font-mono text-xs tabular-nums text-slate-200 whitespace-nowrap shrink-0">
             {String(currentIndex + 1).padStart(2, '0')} / {String(slides.length).padStart(2, '0')}
           </span>
 
@@ -660,35 +750,35 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
             type="button"
             onClick={() => step(1)}
             disabled={currentIndex === slides.length - 1}
-            className="w-10 h-10 inline-flex items-center justify-center rounded-lg text-slate-200 hover:bg-slate-800 disabled:opacity-35 cursor-pointer"
+            className="w-8 h-8 sm:w-9 sm:h-9 inline-flex items-center justify-center rounded-lg text-slate-200 hover:bg-slate-800 disabled:opacity-35 cursor-pointer shrink-0"
             aria-label="Next slide"
           >
-            <ChevronRight className="w-5 h-5" />
+            <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
 
-          <span className="w-px h-5 bg-slate-700 mx-1" aria-hidden="true" />
+          <span className="w-px h-4 bg-slate-700 mx-0.5 shrink-0" aria-hidden="true" />
 
-          {/* Laser Pointer Quick Toggle */}
+          {/* Laser Pointer Toggle (separate from drawing) */}
           <button
             type="button"
-            onClick={() => selectTool(activeTool === 'laser' ? 'pointer' : 'laser')}
-            className={`w-10 h-10 inline-flex items-center justify-center rounded-lg transition-colors cursor-pointer ${
-              activeTool === 'laser'
+            onClick={() => selectTool(isLaserActive ? 'pointer' : 'laser')}
+            className={`w-8 h-8 sm:w-9 sm:h-9 inline-flex items-center justify-center rounded-lg transition-colors cursor-pointer shrink-0 ${
+              isLaserActive
                 ? 'bg-red-600 text-white'
                 : 'text-slate-300 hover:bg-slate-800'
             }`}
             aria-label="Toggle laser pointer (L)"
-            aria-pressed={activeTool === 'laser'}
+            aria-pressed={isLaserActive}
             title="Laser Pointer (L)"
           >
             <Radio className="w-4 h-4" />
           </button>
 
-          {/* Drawing Tools Quick Toggle */}
+          {/* Drawing Tools Toggle (separate from laser) */}
           <button
             type="button"
             onClick={() => selectTool(isDrawingToolActive ? 'pointer' : lastDrawTool)}
-            className={`w-10 h-10 inline-flex items-center justify-center rounded-lg transition-colors cursor-pointer ${
+            className={`w-8 h-8 sm:w-9 sm:h-9 inline-flex items-center justify-center rounded-lg transition-colors cursor-pointer shrink-0 ${
               isDrawingToolActive
                 ? 'bg-blue-600 text-white'
                 : 'text-slate-300 hover:bg-slate-800'
@@ -700,12 +790,12 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
             <Pen className="w-4 h-4" />
           </button>
 
-          <span className="w-px h-5 bg-slate-700 mx-1" aria-hidden="true" />
+          <span className="w-px h-4 bg-slate-700 mx-0.5 shrink-0" aria-hidden="true" />
 
           <button
             type="button"
             onClick={() => setPresenterView((v) => !v)}
-            className={`w-10 h-10 inline-flex items-center justify-center rounded-lg transition-colors cursor-pointer ${
+            className={`w-8 h-8 sm:w-9 sm:h-9 inline-flex items-center justify-center rounded-lg transition-colors cursor-pointer shrink-0 ${
               presenterView ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800'
             }`}
             aria-label="Toggle presenter notes view (N)"
@@ -717,7 +807,7 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
           <button
             type="button"
             onClick={() => setGridOpen((v) => !v)}
-            className={`w-10 h-10 inline-flex items-center justify-center rounded-lg transition-colors cursor-pointer ${
+            className={`w-8 h-8 sm:w-9 sm:h-9 inline-flex items-center justify-center rounded-lg transition-colors cursor-pointer shrink-0 ${
               gridOpen ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800'
             }`}
             aria-label="Toggle slide grid overview (G)"
@@ -729,7 +819,7 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
           <button
             type="button"
             onClick={() => setBlackout((v) => !v)}
-            className={`w-10 h-10 inline-flex items-center justify-center rounded-lg transition-colors cursor-pointer ${
+            className={`w-8 h-8 sm:w-9 sm:h-9 inline-flex items-center justify-center rounded-lg transition-colors cursor-pointer shrink-0 ${
               blackout ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800'
             }`}
             aria-label="Blackout screen (B)"
@@ -741,7 +831,7 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
           <button
             type="button"
             onClick={toggleFullscreen}
-            className="w-10 h-10 inline-flex items-center justify-center rounded-lg text-slate-300 hover:bg-slate-800 cursor-pointer"
+            className="w-8 h-8 sm:w-9 sm:h-9 inline-flex items-center justify-center rounded-lg text-slate-300 hover:bg-slate-800 cursor-pointer shrink-0"
             aria-label={isFullscreen ? 'Exit fullscreen (F)' : 'Enter fullscreen (F)'}
             title="Fullscreen (F)"
           >
@@ -751,19 +841,19 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
           <button
             type="button"
             onClick={() => setHelpOpen((v) => !v)}
-            className="w-10 h-10 inline-flex items-center justify-center rounded-lg text-slate-300 hover:bg-slate-800 cursor-pointer"
+            className="w-8 h-8 sm:w-9 sm:h-9 inline-flex items-center justify-center rounded-lg text-slate-300 hover:bg-slate-800 cursor-pointer shrink-0"
             aria-label="Keyboard shortcuts (?)"
             title="Keyboard Shortcuts (?)"
           >
             <HelpCircle className="w-4 h-4" />
           </button>
 
-          <span className="w-px h-5 bg-slate-700 mx-1" aria-hidden="true" />
+          <span className="w-px h-4 bg-slate-700 mx-0.5 shrink-0" aria-hidden="true" />
 
           <button
             type="button"
             onClick={() => onExit(currentIndex)}
-            className="px-3 h-10 inline-flex items-center gap-1.5 rounded-lg text-xs font-medium text-slate-200 hover:bg-slate-800 cursor-pointer whitespace-nowrap"
+            className="px-2.5 h-8 sm:h-9 inline-flex items-center gap-1 rounded-lg text-xs font-medium text-slate-200 hover:bg-slate-800 cursor-pointer whitespace-nowrap shrink-0"
             aria-label="Exit presentation (Escape)"
           >
             <X className="w-4 h-4" />
