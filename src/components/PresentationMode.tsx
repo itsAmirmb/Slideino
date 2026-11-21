@@ -4,6 +4,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock,
+  Download,
   Eraser,
   Grid,
   HelpCircle,
@@ -38,6 +39,7 @@ interface PresentationModeProps {
   theme: SlideTheme;
   initialSlideIndex: number;
   onExit: (lastIndex: number) => void;
+  onExportPresentation?: () => void;
 }
 
 function formatTimer(totalSeconds: number): string {
@@ -96,6 +98,7 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
   theme,
   initialSlideIndex,
   onExit,
+  onExportPresentation,
 }) => {
   const activeSlides = deck.slides.filter((s) => !s.hidden);
   const slides = activeSlides.length > 0 ? activeSlides : deck.slides;
@@ -847,6 +850,23 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
           >
             <HelpCircle className="w-4 h-4" />
           </button>
+
+          {onExportPresentation && (
+            <button
+              type="button"
+              onClick={() => {
+                if (document.fullscreenElement) {
+                  document.exitFullscreen?.().catch(() => {});
+                }
+                onExportPresentation();
+              }}
+              className="w-8 h-8 sm:w-9 sm:h-9 inline-flex items-center justify-center rounded-lg text-slate-300 hover:bg-slate-800 cursor-pointer shrink-0"
+              aria-label="Export standalone presentation"
+              title="Export Standalone Presentation (.html)"
+            >
+              <Download className="w-4 h-4" />
+            </button>
+          )}
 
           <span className="w-px h-4 bg-slate-700 mx-0.5 shrink-0" aria-hidden="true" />
 

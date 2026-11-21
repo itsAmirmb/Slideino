@@ -45,9 +45,9 @@ export const ANNOTATION_SIZES = [
 ] as const;
 
 interface LaserTrailPoint {
-  x: number; // pixel x relative to canvas
-  y: number; // pixel y relative to canvas
-  t: number; // performance.now()
+  x: number; // Local CSS px
+  y: number;
+  time: number;
 }
 
 interface PresentationAnnotationLayerProps {
@@ -60,7 +60,8 @@ interface PresentationAnnotationLayerProps {
   onEraseStrokeIds: (ids: string[]) => void;
 }
 
-const LASER_TRAIL_MS = 380;
+const LASER_TRAIL_LIFETIME_MS = 460;
+const LASER_MAX_POINTS = 48;
 
 function distToSegment(
   px: number,
@@ -243,26 +244,22 @@ const PresentationAnnotationLayerImpl: React.FC<PresentationAnnotationLayerProps
   const drawCanvasRef = useRef<HTMLCanvasElement>(null);
   const laserCanvasRef = useRef<HTMLCanvasElement>(null);
   const laserDotRef = useRef<HTMLDivElement>(null);
-  const eraserRingRef = useRef<HTMLDivElement>(null);
+  const eraserCursorRef = useRef<HTMLDivElement>(null);
 
-  // Cached bounding rect & canvas dimensions — avoids forced synchronous reflow in pointermove
   const rectRef = useRef({ left: 0, top: 0, width: 0, height: 0 });
   const sizeRef = useRef({ width: 0, height: 0, dpr: 1 });
   const activeStrokeRef = useRef<AnnotationStroke | null>(null);
   const isErasingRef = useRef(false);
 
-  // Live refs so high-frequency pointer/RAF loops never trigger React re-renders
   const toolRef = useRef<AnnotationTool>(tool);
   toolRef.current = tool;
-  const laserColorRef = useRef(laserColor);
+  const laserColorRef = useRef<string>(laserColor);
   laserColorRef.current = laserColor;
   const annotationsRef = useRef(annotations);
   annotationsRef.current = annotations;
 
-  // Laser trail state (drawn on dedicated lightweight canvas while GPU DOM dot tracks at 0ms latency)
   const laserTrailRef = useRef<LaserTrailPoint[]>([]);
   const laserRafRef = useRef<number | null>(null);
-  const laserCtxRef = useRef<CanvasRenderingContext2D | null>(null);
 
   const refreshRect = useCallback(() => {
     const el = containerRef.current;
@@ -294,73 +291,83 @@ const PresentationAnnotationLayerImpl: React.FC<PresentationAnnotationLayerProps
     ctx.restore();
   }, []);
 
-  const stopLaserLoop = useCallback(() => {
+  const clearLaserCanvas = useCallback(() => {
     if (laserRafRef.current !== null) {
       cancelAnimationFrame(laserRafRef.current);
       laserRafRef.current = null;
     }
+    laserTrailRef.current = [];
+    const canvas = laserCanvasRef.current;
+    if (canvas) {
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+    }
   }, []);
 
-  const renderLaserTrailFrame = useCallback(() => {
+  const tickLaserTrail = useCallback(() => {
     const canvas = laserCanvasRef.current;
     if (!canvas) {
       laserRafRef.current = null;
       return;
     }
-    if (!laserCtxRef.current) {
-      laserCtxRef.current =
-        canvas.getContext('2d', { desynchronized: true }) || canvas.getContext('2d');
-    }
-    const ctx = laserCtxRef.current;
+    const ctx = canvas.getContext('2d');
     if (!ctx) {
       laserRafRef.current = null;
       return;
     }
 
     const { width, height, dpr } = sizeRef.current;
-    if (width <= 0 || height <= 0) {
-      laserRafRef.current = null;
-      return;
-    }
-
     const now = performance.now();
     const trail = laserTrailRef.current;
-    let firstValid = 0;
-    while (firstValid < trail.length && now - trail[firstValid].t >= LASER_TRAIL_MS) {
-      firstValid++;
+
+    let firstAlive = 0;
+    while (firstAlive < trail.length && now - trail[firstAlive].time >= LASER_TRAIL_LIFETIME_MS) {
+      firstAlive++;
     }
-    if (firstValid > 0) {
-      trail.splice(0, firstValid);
+    if (firstAlive > 0) {
+      trail.splice(0, firstAlive);
     }
 
+    ctx.save();
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, width, height);
 
-    if (trail.length > 1) {
-      const hex = laserColorRef.current || '#ef4444';
-      const scale = Math.max(0.65, width / 1280);
+    if (trail.length >= 2) {
+      const strokeColor = laserColorRef.current;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
-      ctx.strokeStyle = hex;
 
+      // Soft tapered outer glow ribbon
       for (let i = 1; i < trail.length; i++) {
         const p0 = trail[i - 1];
         const p1 = trail[i];
-        const ageRatio = 1 - (now - p1.t) / LASER_TRAIL_MS;
-        if (ageRatio <= 0) continue;
+        const ageRatio = Math.max(0, 1 - (now - p1.time) / LASER_TRAIL_LIFETIME_MS);
+        const posRatio = i / (trail.length - 1);
+        const intensity = ageRatio * ageRatio * posRatio;
+        if (intensity <= 0.01) continue;
 
         ctx.beginPath();
         ctx.moveTo(p0.x, p0.y);
         ctx.lineTo(p1.x, p1.y);
-        ctx.globalAlpha = ageRatio * ageRatio * 0.55;
-        ctx.lineWidth = Math.max(1.5, 8.5 * scale * ageRatio);
+        ctx.strokeStyle = strokeColor;
+        ctx.globalAlpha = intensity * 0.45;
+        ctx.lineWidth = Math.max(2, 12 * intensity);
+        ctx.stroke();
+
+        ctx.strokeStyle = '#ffffff';
+        ctx.globalAlpha = intensity * 0.72;
+        ctx.lineWidth = Math.max(1, 3.6 * intensity);
         ctx.stroke();
       }
-      ctx.globalAlpha = 1;
     }
 
-    if (trail.length > 1) {
-      laserRafRef.current = requestAnimationFrame(renderLaserTrailFrame);
+    ctx.restore();
+
+    if (trail.length > 0) {
+      laserRafRef.current = requestAnimationFrame(tickLaserTrail);
     } else {
       laserRafRef.current = null;
     }
@@ -368,45 +375,39 @@ const PresentationAnnotationLayerImpl: React.FC<PresentationAnnotationLayerProps
 
   const ensureLaserLoop = useCallback(() => {
     if (laserRafRef.current === null) {
-      laserRafRef.current = requestAnimationFrame(renderLaserTrailFrame);
+      laserRafRef.current = requestAnimationFrame(tickLaserTrail);
     }
-  }, [renderLaserTrailFrame]);
+  }, [tickLaserTrail]);
 
-  const hideLaserDot = useCallback(() => {
-    if (laserDotRef.current) {
-      laserDotRef.current.style.opacity = '0';
-    }
-  }, []);
-
-  const hideEraserRing = useCallback(() => {
-    if (eraserRingRef.current) {
-      eraserRingRef.current.style.opacity = '0';
-    }
-  }, []);
-
-  // Keep canvases matched to container physical pixels & keep cached rect accurate
+  // Keep canvases matched to container size and cache bounding rect
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
 
-    const syncCanvasSize = (width: number, height: number) => {
+    const syncCanvasSizes = (width: number, height: number) => {
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
       sizeRef.current = { width, height, dpr };
       refreshRect();
-      for (const canvas of [drawCanvasRef.current, laserCanvasRef.current]) {
-        if (!canvas) continue;
-        canvas.width = Math.max(1, Math.round(width * dpr));
-        canvas.height = Math.max(1, Math.round(height * dpr));
+
+      const drawCanvas = drawCanvasRef.current;
+      if (drawCanvas) {
+        drawCanvas.width = Math.max(1, Math.round(width * dpr));
+        drawCanvas.height = Math.max(1, Math.round(height * dpr));
+      }
+      const laserCanvas = laserCanvasRef.current;
+      if (laserCanvas) {
+        laserCanvas.width = Math.max(1, Math.round(width * dpr));
+        laserCanvas.height = Math.max(1, Math.round(height * dpr));
       }
       renderDrawCanvas();
     };
 
     const rect = el.getBoundingClientRect();
-    syncCanvasSize(rect.width, rect.height);
+    syncCanvasSizes(rect.width, rect.height);
 
     const ro = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        syncCanvasSize(entry.contentRect.width, entry.contentRect.height);
+        syncCanvasSizes(entry.contentRect.width, entry.contentRect.height);
       }
     });
     ro.observe(el);
@@ -419,33 +420,23 @@ const PresentationAnnotationLayerImpl: React.FC<PresentationAnnotationLayerProps
     };
   }, [renderDrawCanvas, refreshRect]);
 
-  // Re-render drawing canvas only when saved annotations change
   useEffect(() => {
     renderDrawCanvas();
   }, [annotations, renderDrawCanvas]);
 
-  // Clean up laser/eraser indicators when switching tools
   useEffect(() => {
     if (tool !== 'laser') {
-      laserTrailRef.current = [];
-      stopLaserLoop();
-      hideLaserDot();
-      const canvas = laserCanvasRef.current;
-      if (canvas) {
-        const ctx = laserCtxRef.current || canvas.getContext('2d');
-        ctx?.setTransform(1, 0, 0, 1, 0, 0);
-        ctx?.clearRect(0, 0, canvas.width, canvas.height);
-      }
+      clearLaserCanvas();
+      if (laserDotRef.current) laserDotRef.current.style.opacity = '0';
     }
-    if (tool !== 'eraser') {
-      isErasingRef.current = false;
-      hideEraserRing();
+    if (tool !== 'eraser' && eraserCursorRef.current) {
+      eraserCursorRef.current.style.opacity = '0';
     }
-  }, [tool, stopLaserLoop, hideLaserDot, hideEraserRing]);
+  }, [tool, clearLaserCanvas]);
 
   useEffect(() => {
-    return () => stopLaserLoop();
-  }, [stopLaserLoop]);
+    return () => clearLaserCanvas();
+  }, [clearLaserCanvas]);
 
   const toLocalPoint = (clientX: number, clientY: number) => {
     const r = rectRef.current;
@@ -460,6 +451,40 @@ const PresentationAnnotationLayerImpl: React.FC<PresentationAnnotationLayerProps
         y: py / r.height,
       },
     };
+  };
+
+  const pushLaserPoint = (px: number, py: number, now: number) => {
+    const trail = laserTrailRef.current;
+    const last = trail[trail.length - 1];
+    if (!last || Math.hypot(px - last.x, py - last.y) >= 2) {
+      trail.push({ x: px, y: py, time: now });
+      if (trail.length > LASER_MAX_POINTS) {
+        trail.shift();
+      }
+      ensureLaserLoop();
+    }
+  };
+
+  const updateLaserDot = (px: number, py: number, visible: boolean) => {
+    const dot = laserDotRef.current;
+    if (!dot) return;
+    if (!visible) {
+      dot.style.opacity = '0';
+      return;
+    }
+    dot.style.opacity = '1';
+    dot.style.transform = `translate3d(${px}px, ${py}px, 0)`;
+  };
+
+  const updateEraserCursor = (px: number, py: number, visible: boolean) => {
+    const el = eraserCursorRef.current;
+    if (!el) return;
+    if (!visible) {
+      el.style.opacity = '0';
+      return;
+    }
+    el.style.opacity = '1';
+    el.style.transform = `translate3d(${px}px, ${py}px, 0)`;
   };
 
   const eraseAtPoint = (px: number, py: number) => {
@@ -478,47 +503,28 @@ const PresentationAnnotationLayerImpl: React.FC<PresentationAnnotationLayerProps
     }
   };
 
-  const moveLaserDotDirect = (px: number, py: number, pressed: boolean) => {
-    const dot = laserDotRef.current;
-    if (!dot) return;
-    dot.style.opacity = '1';
-    dot.style.transform = `translate3d(${px}px, ${py}px, 0) scale(${pressed ? 1.25 : 1})`;
-  };
-
-  const moveEraserRingDirect = (px: number, py: number) => {
-    const ring = eraserRingRef.current;
-    if (!ring) return;
-    ring.style.opacity = '1';
-    ring.style.transform = `translate3d(${px}px, ${py}px, 0)`;
-  };
-
-  const handlePointerEnter = () => {
-    refreshRect();
-  };
-
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     const currentTool = toolRef.current;
     if (currentTool === 'pointer') return;
     if (e.button !== 0 && e.pointerType === 'mouse') return;
-    e.preventDefault();
-    e.stopPropagation();
 
     refreshRect();
     const pos = toLocalPoint(e.clientX, e.clientY);
     if (!pos) return;
 
-    e.currentTarget.setPointerCapture?.(e.pointerId);
-
     if (currentTool === 'laser') {
-      moveLaserDotDirect(pos.px, pos.py, true);
-      laserTrailRef.current.push({ x: pos.px, y: pos.py, t: performance.now() });
-      ensureLaserLoop();
+      updateLaserDot(pos.px, pos.py, true);
+      pushLaserPoint(pos.px, pos.py, performance.now());
       return;
     }
 
+    e.preventDefault();
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+
     if (currentTool === 'eraser') {
       isErasingRef.current = true;
-      moveEraserRingDirect(pos.px, pos.py);
+      updateEraserCursor(pos.px, pos.py, true);
       eraseAtPoint(pos.px, pos.py);
       return;
     }
@@ -538,29 +544,31 @@ const PresentationAnnotationLayerImpl: React.FC<PresentationAnnotationLayerProps
     if (currentTool === 'pointer') return;
 
     if (currentTool === 'laser') {
-      const coalesced = e.nativeEvent.getCoalescedEvents?.();
-      const events = coalesced && coalesced.length > 0 ? coalesced : [e.nativeEvent];
+      const nativeEvent = e.nativeEvent as PointerEvent;
+      const coalesced =
+        typeof nativeEvent.getCoalescedEvents === 'function'
+          ? nativeEvent.getCoalescedEvents()
+          : null;
       const now = performance.now();
-      const trail = laserTrailRef.current;
-      let latestPos: ReturnType<typeof toLocalPoint> = null;
 
-      for (let i = 0; i < events.length; i++) {
-        const pt = toLocalPoint(events[i].clientX, events[i].clientY);
-        if (!pt) continue;
-        latestPos = pt;
-        const last = trail[trail.length - 1];
-        if (!last || Math.hypot(pt.px - last.x, pt.py - last.y) >= 2) {
-          trail.push({ x: pt.px, y: pt.py, t: now });
+      if (coalesced && coalesced.length > 0) {
+        let lastPos: { px: number; py: number } | null = null;
+        for (let i = 0; i < coalesced.length; i++) {
+          const p = toLocalPoint(coalesced[i].clientX, coalesced[i].clientY);
+          if (p) {
+            pushLaserPoint(p.px, p.py, now);
+            lastPos = p;
+          }
         }
-      }
-
-      if (trail.length > 72) {
-        trail.splice(0, trail.length - 72);
-      }
-
-      if (latestPos) {
-        moveLaserDotDirect(latestPos.px, latestPos.py, (e.buttons & 1) === 1);
-        ensureLaserLoop();
+        if (lastPos) {
+          updateLaserDot(lastPos.px, lastPos.py, true);
+        }
+      } else {
+        const pos = toLocalPoint(e.clientX, e.clientY);
+        if (pos) {
+          updateLaserDot(pos.px, pos.py, true);
+          pushLaserPoint(pos.px, pos.py, now);
+        }
       }
       return;
     }
@@ -569,7 +577,7 @@ const PresentationAnnotationLayerImpl: React.FC<PresentationAnnotationLayerProps
     if (!pos) return;
 
     if (currentTool === 'eraser') {
-      moveEraserRingDirect(pos.px, pos.py);
+      updateEraserCursor(pos.px, pos.py, true);
       if (isErasingRef.current) {
         eraseAtPoint(pos.px, pos.py);
       }
@@ -625,6 +633,11 @@ const PresentationAnnotationLayerImpl: React.FC<PresentationAnnotationLayerProps
     }
   };
 
+  const handlePointerLeave = () => {
+    if (laserDotRef.current) laserDotRef.current.style.opacity = '0';
+    if (eraserCursorRef.current) eraserCursorRef.current.style.opacity = '0';
+  };
+
   const finishInteraction = (e?: React.PointerEvent<HTMLDivElement>) => {
     if (e && e.currentTarget.hasPointerCapture?.(e.pointerId)) {
       e.currentTarget.releasePointerCapture(e.pointerId);
@@ -632,9 +645,8 @@ const PresentationAnnotationLayerImpl: React.FC<PresentationAnnotationLayerProps
 
     const currentTool = toolRef.current;
     if (currentTool === 'laser') {
-      if (e) {
-        const pos = toLocalPoint(e.clientX, e.clientY);
-        if (pos) moveLaserDotDirect(pos.px, pos.py, false);
+      if (e && e.pointerType !== 'mouse' && laserDotRef.current) {
+        laserDotRef.current.style.opacity = '0';
       }
       return;
     }
@@ -664,16 +676,6 @@ const PresentationAnnotationLayerImpl: React.FC<PresentationAnnotationLayerProps
     renderDrawCanvas();
   };
 
-  const handlePointerLeave = () => {
-    if (toolRef.current === 'laser') {
-      hideLaserDot();
-    }
-    if (toolRef.current === 'eraser') {
-      isErasingRef.current = false;
-      hideEraserRing();
-    }
-  };
-
   const isInteractive = tool !== 'pointer';
   const cursorClass =
     tool === 'laser' || tool === 'eraser'
@@ -685,49 +687,52 @@ const PresentationAnnotationLayerImpl: React.FC<PresentationAnnotationLayerProps
   return (
     <div
       ref={containerRef}
-      onPointerEnter={handlePointerEnter}
+      onPointerEnter={refreshRect}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={finishInteraction}
       onPointerCancel={finishInteraction}
       onPointerLeave={handlePointerLeave}
-      className={`absolute inset-0 z-10 touch-none ${
-        isInteractive ? `pointer-events-auto ${cursorClass}` : 'pointer-events-none'
-      }`}
+      className={`absolute inset-0 z-10 touch-none overflow-hidden ${
+        isInteractive ? 'pointer-events-auto' : 'pointer-events-none'
+      } ${cursorClass}`}
       aria-hidden="true"
     >
+      {/* Persistent Drawing Canvas */}
       <canvas ref={drawCanvasRef} className="absolute inset-0 w-full h-full block" />
+
+      {/* Smooth Fading Laser Trail Canvas */}
       <canvas
         ref={laserCanvasRef}
         className="absolute inset-0 w-full h-full block pointer-events-none"
       />
 
-      {/* Hardware-composited zero-latency Laser Dot */}
+      {/* Glowing Laser Pointer Dot */}
       <div
         ref={laserDotRef}
-        className="absolute top-0 left-0 pointer-events-none will-change-transform"
+        className="absolute top-0 left-0 rounded-full pointer-events-none will-change-transform"
         style={{
           opacity: 0,
-          width: '28px',
-          height: '28px',
-          marginLeft: '-14px',
-          marginTop: '-14px',
-          borderRadius: '9999px',
-          background: `radial-gradient(circle, #ffffff 0%, #ffffff 22%, ${laserColor} 40%, ${laserColor}55 68%, transparent 100%)`,
-          boxShadow: `0 0 14px ${laserColor}`,
+          width: '18px',
+          height: '18px',
+          marginLeft: '-9px',
+          marginTop: '-9px',
+          background: `radial-gradient(circle, #ffffff 0%, #ffffff 32%, ${laserColor} 58%, transparent 100%)`,
+          boxShadow: `0 0 14px 4px ${laserColor}, 0 0 28px 8px ${laserColor}66`,
         }}
       />
 
-      {/* Hardware-composited Eraser Cursor Ring */}
+      {/* Stroke Eraser Cursor Ring */}
       <div
-        ref={eraserRingRef}
-        className="absolute top-0 left-0 pointer-events-none will-change-transform rounded-full border-2 border-white/90 bg-white/15 shadow-[0_0_0_1px_rgba(15,23,42,0.75)]"
+        ref={eraserCursorRef}
+        className="absolute top-0 left-0 rounded-full pointer-events-none border-2 border-white bg-slate-900/30 will-change-transform"
         style={{
           opacity: 0,
-          width: '26px',
-          height: '26px',
-          marginLeft: '-13px',
-          marginTop: '-13px',
+          width: '24px',
+          height: '24px',
+          marginLeft: '-12px',
+          marginTop: '-12px',
+          boxShadow: '0 0 0 1.5px rgba(15, 23, 42, 0.85)',
         }}
       />
     </div>

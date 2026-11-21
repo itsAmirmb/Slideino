@@ -211,10 +211,10 @@ export const DeckManager: React.FC<DeckManagerProps> = ({
                         <button
                           type="button"
                           onClick={() => onExportStandaloneHtml(deck)}
-                          className="h-8 px-3 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
+                          className="h-8 px-3 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer whitespace-nowrap"
                         >
                           <Download className="w-3.5 h-3.5" aria-hidden="true" />
-                          <span>Standalone HTML</span>
+                          <span>Export Presentation</span>
                         </button>
                         <button
                           type="button"

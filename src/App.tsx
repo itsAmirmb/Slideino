@@ -11,7 +11,11 @@ import {
 } from './types/slideino';
 import { DEFAULT_LIBRARIES } from './data/libraries';
 import { SLIDE_TEMPLATES } from './data/starterDeck';
-import { exportStandaloneHtml, mergeSharedCss } from './utils/htmlImporter';
+import { mergeSharedCss } from './utils/htmlImporter';
+import {
+  exportStandalonePresentationHtml,
+  PresentationExportOptions,
+} from './utils/presentationExporter';
 import { detectSlideStaticDimensions } from './utils/slideRuntime';
 import {
   getAllThemes,
@@ -31,7 +35,14 @@ import { ThemeStudio } from './components/ThemeStudio';
 import { LibraryManager } from './components/LibraryManager';
 import { DeckManager } from './components/DeckManager';
 import { ImportModal } from './components/ImportModal';
+import { ExportPresentationModal } from './components/ExportPresentationModal';
 import { PresentationMode } from './components/PresentationMode';
+
+function formatByteSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 export default function App() {
   const [decks, setDecks] = useState<Deck[]>(() => loadDecks());
@@ -46,6 +57,7 @@ export default function App() {
     open: boolean;
     mode: 'import' | 'prompt';
   }>({ open: false, mode: 'import' });
+  const [exportModalDeck, setExportModalDeck] = useState<Deck | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const showToast = useCallback((msg: string) => {
@@ -248,20 +260,33 @@ export default function App() {
     [activeDeck, showToast, updateActiveDeck]
   );
 
-  const handleExportStandaloneHtml = useCallback(
+  const handleOpenExportModal = useCallback(
     (targetDeck: Deck = activeDeck) => {
+      setExportModalDeck(targetDeck);
+    },
+    [activeDeck]
+  );
+
+  const handleConfirmExportPresentation = useCallback(
+    async (targetDeck: Deck, options: PresentationExportOptions) => {
       const themeForDeck =
         allThemes.find((t) => t.id === targetDeck.themeId) || allThemes[0];
-      const html = exportStandaloneHtml(
+      const { html, slideCount, byteSize } = await exportStandalonePresentationHtml(
         targetDeck,
         themeForDeck,
-        window.location.origin
+        window.location.origin,
+        options
       );
-      const slug = targetDeck.title.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-      triggerFileDownload(`${slug || 'slideino-deck'}.html`, html, 'text/html');
-      showToast('Exported standalone HTML presentation');
+      const slug = targetDeck.title
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+      triggerFileDownload(`${slug || 'slideino'}-presentation.html`, html, 'text/html');
+      showToast(
+        `Exported presentation (${slideCount} ${slideCount === 1 ? 'slide' : 'slides'} · ${formatByteSize(byteSize)})`
+      );
     },
-    [activeDeck, allThemes, showToast]
+    [allThemes, showToast]
   );
 
   const handleToggleLibrary = useCallback(
@@ -501,7 +526,7 @@ export default function App() {
             onDeleteSlide={handleDeleteSlide}
             onMoveSlide={handleMoveSlide}
             onOpenImportModal={(mode) => setImportModalState({ open: true, mode })}
-            onExportStandaloneHtml={() => handleExportStandaloneHtml(activeDeck)}
+            onExportStandaloneHtml={() => handleOpenExportModal(activeDeck)}
           />
         )}
 
@@ -546,7 +571,7 @@ export default function App() {
             onDuplicateDeck={handleDuplicateDeck}
             onDeleteDeck={handleDeleteDeck}
             onImportDeckJson={handleImportDeckJson}
-            onExportStandaloneHtml={handleExportStandaloneHtml}
+            onExportStandaloneHtml={handleOpenExportModal}
             onSaveSnapshot={handleSaveSnapshot}
             onRestoreSnapshot={handleRestoreSnapshot}
             onDeleteSnapshot={handleDeleteSnapshot}
@@ -563,11 +588,23 @@ export default function App() {
         onImportSlides={handleImportSlides}
       />
 
+      <ExportPresentationModal
+        isOpen={Boolean(exportModalDeck)}
+        deck={exportModalDeck}
+        theme={
+          (exportModalDeck && allThemes.find((t) => t.id === exportModalDeck.themeId)) ||
+          activeTheme
+        }
+        onClose={() => setExportModalDeck(null)}
+        onExport={handleConfirmExportPresentation}
+      />
+
       {presenting && (
         <PresentationMode
           deck={activeDeck}
           theme={activeTheme}
           initialSlideIndex={activeSlideIndex}
+          onExportPresentation={() => handleOpenExportModal(activeDeck)}
           onExit={(lastIndex) => {
             setPresenting(false);
             setActiveSlideIndex(lastIndex);
@@ -580,7 +617,7 @@ export default function App() {
         <div
           role="status"
           aria-live="polite"
-          className="fixed bottom-5 right-5 z-50 px-4 py-2.5 rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-950 text-xs font-medium shadow-lg border border-slate-800 dark:border-slate-200"
+          className="fixed bottom-5 right-5 z-[70] px-4 py-2.5 rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-950 text-xs font-medium shadow-lg border border-slate-800 dark:border-slate-200"
         >
           {toastMessage}
         </div>

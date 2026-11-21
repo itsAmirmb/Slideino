@@ -690,14 +690,15 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
             <span className="hidden md:inline">AI Prompt</span>
           </button>
 
-          {/* Export Standalone HTML */}
+          {/* Export Standalone Presentation */}
           <button
             type="button"
             onClick={onExportStandaloneHtml}
+            title="Export standalone presentation (.html)"
             className="h-9 px-3 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-medium text-slate-700 dark:text-slate-200 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
           >
             <Download className="w-3.5 h-3.5" aria-hidden="true" />
-            <span className="hidden sm:inline">Export HTML</span>
+            <span className="hidden sm:inline">Export Presentation</span>
           </button>
 
           {/* Studio Light / Dark Toggle */}
