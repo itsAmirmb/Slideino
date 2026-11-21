@@ -12,6 +12,7 @@ import {
 import { DEFAULT_LIBRARIES } from './data/libraries';
 import { SLIDE_TEMPLATES } from './data/starterDeck';
 import { exportStandaloneHtml, mergeSharedCss } from './utils/htmlImporter';
+import { detectSlideStaticDimensions } from './utils/slideRuntime';
 import {
   getAllThemes,
   loadActiveDeckId,
@@ -207,12 +208,16 @@ export default function App() {
   const handleImportSlides = useCallback(
     (slides: Slide[], target: 'append' | 'new-deck', title?: string, sharedCss?: string) => {
       if (target === 'new-deck') {
+        const hasOversizedSlide = slides.some((s) => {
+          const detected = detectSlideStaticDimensions(s.html, s.css);
+          return Boolean(detected && (detected.width > 1280 || detected.height > 720));
+        });
         const newDeck: Deck = {
           id: `deck-${Date.now()}`,
           title: title || 'Imported AI Presentation',
           description: 'Imported from HTML/CSS.',
           themeId: activeDeck.themeId,
-          aspectRatio: '16:9',
+          aspectRatio: hasOversizedSlide ? 'auto' : '16:9',
           defaultTransition: 'fade',
           libraries: { ...activeDeck.libraries },
           customResources: [],

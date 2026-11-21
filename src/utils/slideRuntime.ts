@@ -18,7 +18,68 @@ export interface BuildSlideOptions {
   origin: string;
   isThumbnail?: boolean;
   editMode?: boolean;
+  autoSize?: boolean;
+  autoBaseDims?: { width: number; height: number };
   prefersReducedMotion?: boolean;
+}
+
+const MIN_AUTO_W = 480;
+const MAX_AUTO_W = 3840;
+const MIN_AUTO_H = 320;
+const MAX_AUTO_H = 2400;
+
+function extractPxPair(block: string): { width: number; height: number } | null {
+  const wMatch = block.match(/(?:^|[;{\s])(?:min-)?width\s*:\s*(\d{3,4})(?:\.\d+)?px\b/i);
+  const hMatch = block.match(/(?:^|[;{\s])(?:min-)?height\s*:\s*(\d{3,4})(?:\.\d+)?px\b/i);
+  if (!wMatch || !hMatch) return null;
+  const width = Math.round(Number(wMatch[1]));
+  const height = Math.round(Number(hMatch[1]));
+  if (
+    width >= MIN_AUTO_W &&
+    width <= MAX_AUTO_W &&
+    height >= MIN_AUTO_H &&
+    height <= MAX_AUTO_H
+  ) {
+    return { width, height };
+  }
+  return null;
+}
+
+/**
+ * Fast static detector for explicit slide canvas pixel dimensions (e.g. 1536x864, 1920x1080, 1440x900)
+ * declared on root slide containers or inline styles before the iframe finishes rendering.
+ */
+export function detectSlideStaticDimensions(
+  html: string,
+  css = ''
+): { width: number; height: number } | null {
+  const source = `${css}\n${html}`;
+  if (!source.trim()) return null;
+
+  // 1. Check CSS rule blocks targeting known slide root selectors
+  const cssRuleRegex =
+    /(?:^|[\s},])(html|body|\.slide-container|\.slide-canvas|\.presentation-slide|\.slide|#slide|\[data-slide[^\]]*\])[^{]*\{([^}]{1,1200})\}/gi;
+  let match: RegExpExecArray | null;
+  let best: { width: number; height: number } | null = null;
+  while ((match = cssRuleRegex.exec(source)) !== null) {
+    const pair = extractPxPair(match[2]);
+    if (pair && (!best || pair.width * pair.height > best.width * best.height)) {
+      best = pair;
+    }
+  }
+  if (best) return best;
+
+  // 2. Check inline style on <body> or top-level wrapper (<div>/<section>/<main>/<article>)
+  const inlineRootRegex =
+    /<(body|div|section|main|article)\b[^>]*\bstyle\s*=\s*["']([^"']{1,800})["']/gi;
+  let checked = 0;
+  while ((match = inlineRootRegex.exec(html)) !== null && checked < 6) {
+    checked += 1;
+    const pair = extractPxPair(match[2]);
+    if (pair) return pair;
+  }
+
+  return null;
 }
 
 function escapeStyleClose(css: string): string {
@@ -170,7 +231,8 @@ function buildThemeCss(
   theme: SlideTheme,
   slide: Slide,
   prefersReducedMotion: boolean,
-  isThumbnail: boolean
+  isThumbnail: boolean,
+  autoSize: boolean
 ): string {
   return `
 ${buildRootVariablesCss(theme, slide)}
@@ -182,8 +244,7 @@ html, body {
   margin: 0;
   padding: 0;
   width: 100%;
-  height: 100%;
-  overflow: hidden;
+  ${autoSize ? 'min-height: 100%; height: 100%; overflow: visible;' : 'height: 100%; overflow: hidden;'}
   background: var(--slide-bg);
   color: var(--slide-text);
   font-family: var(--slide-font-body);
@@ -230,16 +291,23 @@ function buildRuntimeBootstrapScript(
   theme: SlideTheme,
   libraries: LibraryConfig,
   isThumbnail: boolean,
-  editMode: boolean
+  editMode: boolean,
+  autoSize: boolean,
+  autoBaseDims?: { width: number; height: number }
 ): string {
   const safeId = JSON.stringify(instanceId);
   const mermaidTheme = theme.isDark ? 'dark' : 'neutral';
+  const baseW = autoBaseDims?.width || 1280;
+  const baseH = autoBaseDims?.height || 720;
 
   return `<script data-slideino-runtime="true">
 (function() {
   var INSTANCE_ID = ${safeId};
   var IS_THUMBNAIL = ${isThumbnail ? 'true' : 'false'};
   var EDIT_MODE = ${editMode ? 'true' : 'false'};
+  var AUTO_SIZE = ${autoSize ? 'true' : 'false'};
+  var AUTO_BASE_W = ${Math.round(baseW)};
+  var AUTO_BASE_H = ${Math.round(baseH)};
 
   function postHost(type, payload) {
     try {
@@ -328,14 +396,162 @@ function buildRuntimeBootstrapScript(
     }
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', function() {
-      setTimeout(hydrateLibraries, 20);
-    });
-  } else {
-    setTimeout(hydrateLibraries, 20);
+  var lastReportedW = AUTO_BASE_W;
+  var lastReportedH = AUTO_BASE_H;
+  var measureTimer = null;
+
+  function findClippingAncestorRect(el, stopNode) {
+    var cur = el.parentElement;
+    var clipR = null;
+    while (cur && cur !== stopNode && cur !== document.body && cur !== document.documentElement) {
+      var cs = window.getComputedStyle(cur);
+      var ox = cs.overflowX;
+      var oy = cs.overflowY;
+      if (ox === 'hidden' || ox === 'clip' || oy === 'hidden' || oy === 'clip') {
+        var r = cur.getBoundingClientRect();
+        if (!clipR) {
+          clipR = { right: r.right, bottom: r.bottom };
+        } else {
+          clipR.right = Math.min(clipR.right, r.right);
+          clipR.bottom = Math.min(clipR.bottom, r.bottom);
+        }
+      }
+      cur = cur.parentElement;
+    }
+    return clipR;
   }
-  window.addEventListener('load', hydrateLibraries);
+
+  function measureAndReportSize() {
+    if (!AUTO_SIZE) return;
+    if (document.documentElement && document.documentElement.classList.contains('__sl_dragging__')) {
+      return;
+    }
+    try {
+      var measuredW = Math.max(AUTO_BASE_W, lastReportedW);
+      var measuredH = Math.max(AUTO_BASE_H, lastReportedH);
+
+      var explicitRoot = document.querySelector(
+        '.slide-container, .slide-canvas, .presentation-slide, .slide, #slide, [data-slide], [data-slide-canvas]'
+      );
+      if (explicitRoot && explicitRoot.getBoundingClientRect) {
+        var er = explicitRoot.getBoundingClientRect();
+        var ecs = window.getComputedStyle(explicitRoot);
+        var ew = Math.ceil(Math.max(er.width, explicitRoot.scrollWidth || 0));
+        var eh = Math.ceil(Math.max(er.height, explicitRoot.scrollHeight || 0));
+        if (ew >= 480 && eh >= 320 && ecs.display !== 'none') {
+          measuredW = Math.max(measuredW, ew);
+          measuredH = Math.max(measuredH, eh);
+        }
+      }
+
+      var docEl = document.documentElement;
+      var body = document.body;
+      if (docEl) {
+        measuredW = Math.max(measuredW, Math.ceil(docEl.scrollWidth || 0));
+        measuredH = Math.max(measuredH, Math.ceil(docEl.scrollHeight || 0));
+      }
+      if (body) {
+        measuredW = Math.max(measuredW, Math.ceil(body.scrollWidth || 0));
+        measuredH = Math.max(measuredH, Math.ceil(body.scrollHeight || 0));
+      }
+
+      var scanRoot = explicitRoot || body;
+      if (scanRoot) {
+        var rootRect = scanRoot.getBoundingClientRect();
+        var originLeft = Math.min(0, rootRect.left);
+        var originTop = Math.min(0, rootRect.top);
+        var nodes = scanRoot.querySelectorAll('*');
+        var limit = Math.min(nodes.length, 600);
+        for (var i = 0; i < limit; i++) {
+          var el = nodes[i];
+          if (!el || !el.getBoundingClientRect) continue;
+          if (
+            el.id === '__slideino_editor_overlay__' ||
+            el.hasAttribute('data-slideino-editor') ||
+            (el.closest && el.closest('#__slideino_editor_overlay__'))
+          ) {
+            continue;
+          }
+          var tag = el.tagName ? el.tagName.toLowerCase() : '';
+          if (
+            tag === 'script' ||
+            tag === 'style' ||
+            tag === 'link' ||
+            tag === 'meta' ||
+            tag === 'head' ||
+            tag === 'title'
+          ) {
+            continue;
+          }
+          var cs = window.getComputedStyle(el);
+          if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) === 0) {
+            continue;
+          }
+          if (cs.pointerEvents === 'none' && cs.filter && cs.filter.indexOf('blur') !== -1) {
+            continue;
+          }
+          var r = el.getBoundingClientRect();
+          if (r.width < 2 || r.height < 2 || r.right <= 0 || r.bottom <= 0) continue;
+
+          var clip = findClippingAncestorRect(el, scanRoot);
+          var visibleRight = clip ? Math.min(r.right, clip.right) : r.right;
+          var visibleBottom = clip ? Math.min(r.bottom, clip.bottom) : r.bottom;
+
+          var rightEdge = Math.ceil(visibleRight - originLeft);
+          var bottomEdge = Math.ceil(visibleBottom - originTop);
+          if (rightEdge > measuredW && rightEdge <= ${MAX_AUTO_W}) {
+            measuredW = rightEdge;
+          }
+          if (bottomEdge > measuredH && bottomEdge <= ${MAX_AUTO_H}) {
+            measuredH = bottomEdge;
+          }
+        }
+      }
+
+      measuredW = Math.max(${MIN_AUTO_W}, Math.min(${MAX_AUTO_W}, Math.round(measuredW)));
+      measuredH = Math.max(${MIN_AUTO_H}, Math.min(${MAX_AUTO_H}, Math.round(measuredH)));
+
+      if (Math.abs(measuredW - lastReportedW) >= 4 || Math.abs(measuredH - lastReportedH) >= 4) {
+        lastReportedW = measuredW;
+        lastReportedH = measuredH;
+        postHost('content-size', { width: measuredW, height: measuredH });
+      }
+    } catch (_) {}
+  }
+
+  function scheduleMeasure(delay) {
+    if (!AUTO_SIZE) return;
+    if (measureTimer) clearTimeout(measureTimer);
+    measureTimer = setTimeout(measureAndReportSize, delay || 40);
+  }
+
+  function onReady() {
+    setTimeout(hydrateLibraries, 20);
+    if (AUTO_SIZE) {
+      scheduleMeasure(40);
+      setTimeout(measureAndReportSize, 220);
+      setTimeout(measureAndReportSize, 650);
+      if (document.fonts && document.fonts.ready) {
+        document.fonts.ready.then(function() { scheduleMeasure(30); }).catch(function() {});
+      }
+      if (typeof ResizeObserver === 'function' && document.body) {
+        try {
+          var ro = new ResizeObserver(function() { scheduleMeasure(80); });
+          ro.observe(document.body);
+        } catch (_) {}
+      }
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', onReady);
+  } else {
+    onReady();
+  }
+  window.addEventListener('load', function() {
+    hydrateLibraries();
+    scheduleMeasure(50);
+  });
 })();
 </script>`;
 }
@@ -351,6 +567,8 @@ export function buildSlideDocument(options: BuildSlideOptions): string {
     origin,
     isThumbnail = false,
     editMode = false,
+    autoSize = false,
+    autoBaseDims,
     prefersReducedMotion = false,
   } = options;
 
@@ -381,7 +599,9 @@ export function buildSlideDocument(options: BuildSlideOptions): string {
     theme,
     libraries,
     isThumbnail,
-    activeEditMode
+    activeEditMode,
+    autoSize,
+    autoBaseDims
   );
   const visualEditorScript = activeEditMode
     ? buildVisualEditorInjection(instanceId, isFullDocument)
@@ -439,7 +659,7 @@ export function buildSlideDocument(options: BuildSlideOptions): string {
   }
 
   const themeStyleTag = `<style data-slideino-theme="true">${escapeStyleClose(
-    buildThemeCss(theme, slide, prefersReducedMotion, isThumbnail)
+    buildThemeCss(theme, slide, prefersReducedMotion, isThumbnail, autoSize)
   )}</style>`;
 
   // Wrap HTML fragment cleanly

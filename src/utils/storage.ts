@@ -183,7 +183,7 @@ export function validateImportedDeckJson(raw: string): Deck | null {
       title: obj.title.slice(0, 120),
       description: typeof obj.description === 'string' ? obj.description.slice(0, 400) : '',
       themeId: typeof obj.themeId === 'string' ? obj.themeId : 'atelier-light',
-      aspectRatio: ['16:9', '16:10', '4:3', '9:16', 'fluid'].includes(String(obj.aspectRatio))
+      aspectRatio: ['auto', '16:9', '16:10', '4:3', '9:16', 'fluid'].includes(String(obj.aspectRatio))
         ? (obj.aspectRatio as Deck['aspectRatio'])
         : '16:9',
       defaultTransition: ['fade', 'slide', 'zoom', 'none'].includes(String(obj.defaultTransition))

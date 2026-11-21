@@ -6,7 +6,10 @@ import {
   SlideTheme,
 } from '../types/slideino';
 import { LIBRARY_CATALOG } from '../data/libraries';
-import { buildSlideDocument } from './slideRuntime';
+import {
+  buildSlideDocument,
+  detectSlideStaticDimensions,
+} from './slideRuntime';
 
 export interface ParsedImportResult {
   slides: Slide[];
@@ -710,6 +713,8 @@ export function buildAiPromptTemplate(
   const dims =
     deck.aspectRatio === 'fluid'
       ? 'Fluid responsive viewport (100% width x 100% height)'
+      : deck.aspectRatio === 'auto'
+      ? 'Auto-fit canvas (1280x720px baseline, automatically scales larger content without clipping)'
       : `${deck.aspectRatio} canvas (${ASPECT_RATIO_DIMENSIONS[deck.aspectRatio].width}x${ASPECT_RATIO_DIMENSIONS[deck.aspectRatio].height}px)`;
 
   return `Create a presentation slide deck in clean HTML and CSS compatible with Slideino.
@@ -745,25 +750,37 @@ export function exportStandaloneHtml(deck: Deck, theme: SlideTheme, origin: stri
   const visibleSlides = deck.slides.filter((s) => !s.hidden);
   const slidesToExport = visibleSlides.length > 0 ? visibleSlides : deck.slides;
 
+  const isAuto = deck.aspectRatio === 'auto';
   const dims =
     deck.aspectRatio === 'fluid'
-      ? { width: 1280, height: 720, fluid: true }
-      : { ...ASPECT_RATIO_DIMENSIONS[deck.aspectRatio], fluid: false };
+      ? { width: 1280, height: 720, fluid: true, auto: false }
+      : deck.aspectRatio === 'auto'
+      ? { width: 1280, height: 720, fluid: false, auto: true }
+      : { ...ASPECT_RATIO_DIMENSIONS[deck.aspectRatio], fluid: false, auto: false };
 
-  const compiledDocs = slidesToExport.map((slide, idx) => ({
-    title: slide.title,
-    notes: slide.notes,
-    doc: buildSlideDocument({
-      slide,
-      theme,
-      libraries: deck.libraries,
-      customResources: deck.customResources,
-      sharedCss: deck.sharedCss,
-      instanceId: `export-${idx}`,
-      origin,
-      isThumbnail: false,
-    }),
-  }));
+  const compiledDocs = slidesToExport.map((slide, idx) => {
+    const slideDims = isAuto
+      ? detectSlideStaticDimensions(slide.html, slide.css) || { width: 1280, height: 720 }
+      : { width: dims.width, height: dims.height };
+    return {
+      title: slide.title,
+      notes: slide.notes,
+      width: slideDims.width,
+      height: slideDims.height,
+      doc: buildSlideDocument({
+        slide,
+        theme,
+        libraries: deck.libraries,
+        customResources: deck.customResources,
+        sharedCss: deck.sharedCss,
+        instanceId: `export-${idx}`,
+        origin,
+        isThumbnail: false,
+        autoSize: isAuto,
+        autoBaseDims: slideDims,
+      }),
+    };
+  });
 
   // Safe JSON serialization preventing </script> breakout
   const safePayload = JSON.stringify({
@@ -857,6 +874,8 @@ export function exportStandaloneHtml(deck: Deck, theme: SlideTheme, origin: stri
     const prevBtn = document.getElementById('prev');
     const nextBtn = document.getElementById('next');
 
+    let activeDims = { width: DECK.dims.width, height: DECK.dims.height };
+
     function layout() {
       const vw = window.innerWidth;
       const vh = window.innerHeight;
@@ -868,17 +887,24 @@ export function exportStandaloneHtml(deck: Deck, theme: SlideTheme, origin: stri
         frame.style.transform = 'none';
         return;
       }
-      const scale = Math.min(vw / DECK.dims.width, vh / DECK.dims.height);
-      wrap.style.width = Math.round(DECK.dims.width * scale) + 'px';
-      wrap.style.height = Math.round(DECK.dims.height * scale) + 'px';
-      frame.style.width = DECK.dims.width + 'px';
-      frame.style.height = DECK.dims.height + 'px';
+      const w = activeDims.width || DECK.dims.width;
+      const h = activeDims.height || DECK.dims.height;
+      const scale = Math.min(vw / w, vh / h);
+      wrap.style.width = Math.round(w * scale) + 'px';
+      wrap.style.height = Math.round(h * scale) + 'px';
+      frame.style.width = w + 'px';
+      frame.style.height = h + 'px';
       frame.style.transform = 'scale(' + scale + ')';
     }
 
     function render() {
       const slide = DECK.slides[index];
       if (!slide) return;
+      activeDims = {
+        width: slide.width || DECK.dims.width,
+        height: slide.height || DECK.dims.height
+      };
+      layout();
       frame.srcdoc = slide.doc;
       counter.textContent = String(index + 1).padStart(2, '0') + ' / ' + String(DECK.slides.length).padStart(2, '0');
       progress.style.width = (((index + 1) / DECK.slides.length) * 100) + '%';
@@ -908,6 +934,15 @@ export function exportStandaloneHtml(deck: Deck, theme: SlideTheme, origin: stri
 
     window.addEventListener('message', (e) => {
       if (e.source !== frame.contentWindow || !e.data || e.data.source !== 'slideino-frame') return;
+      if (e.data.type === 'content-size' && DECK.dims.auto && e.data.payload) {
+        const w = Math.max(480, Math.min(3840, Math.round(e.data.payload.width || 1280)));
+        const h = Math.max(320, Math.min(2400, Math.round(e.data.payload.height || 720)));
+        if (Math.abs(activeDims.width - w) >= 4 || Math.abs(activeDims.height - h) >= 4) {
+          activeDims = { width: w, height: h };
+          layout();
+        }
+        return;
+      }
       if (e.data.type === 'keydown') {
         const k = e.data.payload && e.data.payload.key;
         if (k === 'ArrowRight' || k === ' ' || k === 'PageDown') step(1);

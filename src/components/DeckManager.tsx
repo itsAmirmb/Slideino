@@ -11,7 +11,7 @@ import {
   Trash2,
   Upload,
 } from 'lucide-react';
-import { Deck, SlideTheme } from '../types/slideino';
+import { ASPECT_RATIO_LABELS, Deck, SlideTheme } from '../types/slideino';
 import { triggerFileDownload, validateImportedDeckJson } from '../utils/storage';
 
 interface DeckManagerProps {
@@ -179,7 +179,7 @@ export const DeckManager: React.FC<DeckManagerProps> = ({
                             {deck.slides.length} {deck.slides.length === 1 ? 'slide' : 'slides'}
                           </span>
                           <span aria-hidden="true">·</span>
-                          <span>{deck.aspectRatio}</span>
+                          <span>{ASPECT_RATIO_LABELS[deck.aspectRatio] || deck.aspectRatio}</span>
                           <span aria-hidden="true">·</span>
                           <span>{getThemeName(deck.themeId)}</span>
                           <span aria-hidden="true">·</span>

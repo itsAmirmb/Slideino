@@ -12,7 +12,7 @@ import {
   Upload,
   X,
 } from 'lucide-react';
-import { Deck, Slide, SlideTheme } from '../types/slideino';
+import { ASPECT_RATIO_LABELS, Deck, Slide, SlideTheme } from '../types/slideino';
 import {
   buildAiPromptTemplate,
   buildWebCaptureScript,
@@ -596,7 +596,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
         {mode === 'prompt' && (
           <div className="p-6 flex flex-col gap-4 overflow-y-auto">
             <p className="text-sm text-slate-600 dark:text-slate-400">
-              Copy this tailored prompt into your preferred AI tool so the generated HTML and CSS slides automatically match your active theme variables ({theme.name}), aspect ratio ({deck.aspectRatio}), and enabled libraries.
+              Copy this tailored prompt into your preferred AI tool so the generated HTML and CSS slides automatically match your active theme variables ({theme.name}), screen size ({ASPECT_RATIO_LABELS[deck.aspectRatio] || deck.aspectRatio}), and enabled libraries.
             </p>
 
             <pre className="p-4 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-mono text-slate-800 dark:text-slate-200 overflow-x-auto whitespace-pre-wrap leading-relaxed max-h-72">

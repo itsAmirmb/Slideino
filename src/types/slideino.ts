@@ -1,6 +1,6 @@
 export type WorkspaceTab = 'studio' | 'themes' | 'libraries' | 'decks';
 
-export type AspectRatio = '16:9' | '16:10' | '4:3' | '9:16' | 'fluid';
+export type AspectRatio = 'auto' | '16:9' | '16:10' | '4:3' | '9:16' | 'fluid';
 
 export type TransitionType = 'fade' | 'slide' | 'zoom' | 'none';
 
@@ -112,13 +112,22 @@ export interface SlideTemplate {
 }
 
 export const ASPECT_RATIO_DIMENSIONS: Record<
-  Exclude<AspectRatio, 'fluid'>,
+  Exclude<AspectRatio, 'fluid' | 'auto'>,
   { width: number; height: number; label: string }
 > = {
   '16:9': { width: 1280, height: 720, label: '16:9 Widescreen' },
   '16:10': { width: 1280, height: 800, label: '16:10 Display' },
   '4:3': { width: 1024, height: 768, label: '4:3 Classic' },
   '9:16': { width: 720, height: 1280, label: '9:16 Vertical' },
+};
+
+export const ASPECT_RATIO_LABELS: Record<AspectRatio, string> = {
+  auto: 'Auto (Fit Content)',
+  '16:9': '16:9 Widescreen',
+  '16:10': '16:10 Display',
+  '4:3': '4:3 Classic',
+  '9:16': '9:16 Vertical',
+  fluid: 'Fluid Responsive',
 };
 
 export type InsertElementType =

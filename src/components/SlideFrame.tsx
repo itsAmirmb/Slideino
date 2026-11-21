@@ -20,7 +20,10 @@ import {
   SlideLayerItem,
   SlideTheme,
 } from '../types/slideino';
-import { buildSlideDocument } from '../utils/slideRuntime';
+import {
+  buildSlideDocument,
+  detectSlideStaticDimensions,
+} from '../utils/slideRuntime';
 
 export interface SlideFrameHandle {
   sendCommand: (command: EditorCommand) => void;
@@ -37,6 +40,7 @@ interface SlideFrameProps {
   editMode?: boolean;
   zoom?: 'fit' | number;
   onScaleChange?: (scale: number) => void;
+  onDimensionsChange?: (dims: { width: number; height: number }) => void;
   onForwardKey?: (key: string, shiftKey: boolean) => void;
   onVisualHtmlChange?: (html: string, commit: boolean) => void;
   onElementSelect?: (
@@ -66,6 +70,7 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(
       editMode = false,
       zoom = 'fit',
       onScaleChange,
+      onDimensionsChange,
       onForwardKey,
       onVisualHtmlChange,
       onElementSelect,
@@ -92,7 +97,17 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(
     const prevDocMetaRef = useRef<string>('');
     const cachedSrcDocRef = useRef<string>('');
 
+    const isAuto = aspectRatio === 'auto';
+    const staticAutoDims = useMemo(
+      () => (isAuto ? detectSlideStaticDimensions(slide.html, slide.css) : null),
+      [isAuto, slide.html, slide.css]
+    );
+
     const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
+    const [measuredAutoDims, setMeasuredAutoDims] = useState<{
+      width: number;
+      height: number;
+    } | null>(null);
     const [runtimeError, setRuntimeError] = useState<string | null>(null);
     const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
 
@@ -145,12 +160,31 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(
 
     // Listen for validated postMessage events from this specific iframe only
     useEffect(() => {
-      if (isThumbnail) return;
+      if (isThumbnail && !isAuto) return;
       const onMessage = (event: MessageEvent) => {
         if (event.source !== iframeRef.current?.contentWindow) return;
         const data = event.data;
         if (!data || typeof data !== 'object') return;
         if (data.source !== 'slideino-frame' || data.instanceId !== instanceId) return;
+
+        if (
+          data.type === 'content-size' &&
+          isAuto &&
+          data.payload &&
+          typeof data.payload.width === 'number' &&
+          typeof data.payload.height === 'number'
+        ) {
+          const w = Math.max(480, Math.min(3840, Math.round(data.payload.width)));
+          const h = Math.max(320, Math.min(2400, Math.round(data.payload.height)));
+          setMeasuredAutoDims((prev) =>
+            prev && Math.abs(prev.width - w) < 4 && Math.abs(prev.height - h) < 4
+              ? prev
+              : { width: w, height: h }
+          );
+          return;
+        }
+
+        if (isThumbnail) return;
 
         if (
           data.type === 'keydown' &&
@@ -201,6 +235,7 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(
     }, [
       instanceId,
       isThumbnail,
+      isAuto,
       onForwardKey,
       onVisualHtmlChange,
       onElementSelect,
@@ -225,6 +260,7 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(
         sharedCssLen: sharedCss?.length || 0,
         editMode: Boolean(editMode && !isThumbnail),
         isThumbnail,
+        isAuto,
         prefersReducedMotion,
       });
 
@@ -257,6 +293,8 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(
         origin,
         isThumbnail,
         editMode: Boolean(editMode && !isThumbnail),
+        autoSize: isAuto,
+        autoBaseDims: staticAutoDims || { width: 1280, height: 720 },
         prefersReducedMotion,
       });
 
@@ -279,13 +317,22 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(
       origin,
       isThumbnail,
       editMode,
+      isAuto,
+      staticAutoDims,
       prefersReducedMotion,
     ]);
+
+    // Reset live measured dimensions whenever the slide document reloads or aspectRatio changes
+    useEffect(() => {
+      setMeasuredAutoDims(null);
+    }, [srcDoc, isAuto]);
 
     const isFluid = aspectRatio === 'fluid';
     const isManualZoom = !isThumbnail && !isFluid && typeof zoom === 'number' && Number.isFinite(zoom) && zoom > 0;
     const baseDims = isFluid
       ? { width: 1280, height: 720 }
+      : isAuto
+      ? measuredAutoDims || staticAutoDims || { width: 1280, height: 720 }
       : ASPECT_RATIO_DIMENSIONS[aspectRatio];
 
     const scale = useMemo(() => {
@@ -302,6 +349,12 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(
         onScaleChange(scale);
       }
     }, [scale, isThumbnail, onScaleChange]);
+
+    useEffect(() => {
+      if (!isThumbnail && onDimensionsChange) {
+        onDimensionsChange({ width: baseDims.width, height: baseDims.height });
+      }
+    }, [baseDims.width, baseDims.height, isThumbnail, onDimensionsChange]);
 
     const stageWidth = isFluid ? '100%' : `${Math.max(1, Math.floor(baseDims.width * scale))}px`;
     const stageHeight = isFluid ? '100%' : `${Math.max(1, Math.floor(baseDims.height * scale))}px`;

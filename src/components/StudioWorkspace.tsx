@@ -119,6 +119,10 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
   const [resizingPanel, setResizingPanel] = useState<'left' | 'right' | null>(null);
   const [canvasZoom, setCanvasZoom] = useState<'fit' | number>('fit');
   const [effectiveScale, setEffectiveScale] = useState(1);
+  const [resolvedSlideDims, setResolvedSlideDims] = useState<{
+    width: number;
+    height: number;
+  }>({ width: 1280, height: 720 });
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('design');
   const [editMode, setEditMode] = useState(true);
   const [snapEnabled, setSnapEnabled] = useState(true);
@@ -603,6 +607,7 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
             }
             className="h-9 px-2.5 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-200 cursor-pointer"
           >
+            <option value="auto">Auto (Fit Content)</option>
             <option value="16:9">16:9 Widescreen</option>
             <option value="16:10">16:10 Display</option>
             <option value="4:3">4:3 Classic</option>
@@ -1182,6 +1187,7 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
                   editMode={editMode}
                   zoom={canvasZoom}
                   onScaleChange={setEffectiveScale}
+                  onDimensionsChange={setResolvedSlideDims}
                   onForwardKey={handleStageKeyForward}
                   onVisualHtmlChange={handleVisualHtmlChange}
                   onElementSelect={handleElementSelect}
@@ -1212,6 +1218,14 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
+              {deck.aspectRatio === 'auto' && (
+                <span
+                  className="hidden sm:inline-flex items-center px-2 h-7 rounded-md bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-mono text-[11px] tabular-nums text-slate-600 dark:text-slate-300 whitespace-nowrap"
+                  title="Auto-detected slide canvas size"
+                >
+                  Auto {resolvedSlideDims.width}×{resolvedSlideDims.height}
+                </span>
+              )}
               {/* Canvas Zoom Controls */}
               {deck.aspectRatio !== 'fluid' && (
                 <div
