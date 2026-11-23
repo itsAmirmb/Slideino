@@ -315,11 +315,20 @@ export async function exportStandalonePresentationHtml(
 
     /* Floating Two-Tier Compact Dock */
     #dock-wrap {
-      position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%);
+      position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%) translateY(0);
       z-index: 35; display: flex; flex-direction: column; align-items: center; gap: 6px;
-      max-width: 96vw; transition: opacity 200ms ease;
+      max-width: 96vw; transition: opacity 200ms ease, transform 200ms ease;
     }
-    #dock-wrap.is-hidden { opacity: 0; pointer-events: none; }
+    #dock-wrap.is-hidden { opacity: 0; transform: translateX(-50%) translateY(8px); pointer-events: none; }
+    #dock-reveal {
+      position: fixed; bottom: 8px; left: 50%; transform: translateX(-50%);
+      z-index: 35; height: 28px; padding: 0 10px; border-radius: 8px;
+      border: 1px solid rgba(51, 65, 85, 0.75); background: rgba(15, 23, 42, 0.85);
+      color: #cbd5e1; cursor: pointer; display: none; align-items: center; justify-content: center;
+      opacity: 0.16; backdrop-filter: blur(8px); transition: opacity 180ms ease, background 150ms ease, color 150ms ease;
+    }
+    #dock-reveal.is-open { display: inline-flex; }
+    #dock-reveal:hover, #dock-reveal:focus-visible { opacity: 1; background: #0f172a; color: #ffffff; }
     .hud-bar {
       display: flex; align-items: center; gap: 4px;
       padding: 4px 8px; border-radius: 12px;
@@ -439,7 +448,7 @@ export async function exportStandalonePresentationHtml(
     }
 
     @media print {
-      #dock-wrap, .progress-track, #presenter-sidebar, #presenter-header { display: none !important; }
+      #dock-wrap, #dock-reveal, .progress-track, #presenter-sidebar, #presenter-header { display: none !important; }
       html, body, #app, #stage-layout, #stage-container {
         position: static !important; overflow: visible !important; background: #ffffff !important;
       }
@@ -501,6 +510,10 @@ export async function exportStandalonePresentationHtml(
     </div>
   </main>
 
+  <button type="button" id="dock-reveal" title="Show Toolbar (T)" aria-label="Show presentation toolbar (T)">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>
+  </button>
+
   <div id="dock-wrap">
     <!-- Separate Laser Color Bar -->
     <div id="laser-bar" class="hud-sub" role="toolbar" aria-label="Laser pointer colors">
@@ -510,6 +523,9 @@ export async function exportStandalonePresentationHtml(
       <button type="button" class="swatch" data-laser-color="#22c55e" style="background:#22c55e" title="Green Laser" aria-label="Green Laser"></button>
       <button type="button" class="swatch" data-laser-color="#38bdf8" style="background:#38bdf8" title="Blue Laser" aria-label="Blue Laser"></button>
       <span class="hud-sep"></span>
+      <button type="button" class="hud-btn sm" id="laser-hide-opts" title="Hide Laser Options (O)" aria-label="Hide laser options">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
       <button type="button" class="hud-btn sm" id="laser-close" title="Turn Off Laser (Esc)" aria-label="Turn off laser">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
       </button>
@@ -557,6 +573,9 @@ export async function exportStandalonePresentationHtml(
       <button type="button" class="hud-btn sm" id="ann-clear" title="Clear Slide Drawings (C)" aria-label="Clear slide drawings" disabled>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
       </button>
+      <button type="button" class="hud-btn sm" id="draw-hide-opts" title="Hide Drawing Options (O)" aria-label="Hide drawing options">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
       <button type="button" class="hud-btn sm" id="draw-close" title="Done Drawing (Esc)" aria-label="Done drawing">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
       </button>
@@ -579,6 +598,9 @@ export async function exportStandalonePresentationHtml(
       <button type="button" class="hud-btn" id="btn-draw" title="Draw & Annotate (P)" aria-label="Drawing tools">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
       </button>
+      <button type="button" class="hud-btn sm" id="btn-show-opts" style="display:none; width:28px; height:34px;" title="Show Tool Options (O)" aria-label="Show tool options">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>
+      </button>
 
       <span class="hud-sep" id="view-sep"></span>
       <button type="button" class="hud-btn" id="btn-notes" title="Presenter Notes & Timer (N)" aria-label="Presenter view">
@@ -595,6 +617,9 @@ export async function exportStandalonePresentationHtml(
       </button>
       <button type="button" class="hud-btn" id="btn-help" title="Keyboard Shortcuts (?)" aria-label="Keyboard shortcuts">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
+      </button>
+      <button type="button" class="hud-btn" id="btn-hide-dock" title="Hide Toolbar (T)" aria-label="Hide toolbar">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
       </button>
     </nav>
   </div>
@@ -656,10 +681,13 @@ export async function exportStandalonePresentationHtml(
     var prevBtn = document.getElementById('prev');
     var nextBtn = document.getElementById('next');
     var dockWrap = document.getElementById('dock-wrap');
+    var dockReveal = document.getElementById('dock-reveal');
     var laserBar = document.getElementById('laser-bar');
     var drawBar = document.getElementById('draw-bar');
     var btnLaser = document.getElementById('btn-laser');
     var btnDraw = document.getElementById('btn-draw');
+    var btnShowOpts = document.getElementById('btn-show-opts');
+    var btnHideDock = document.getElementById('btn-hide-dock');
     var btnNotes = document.getElementById('btn-notes');
     var btnGrid = document.getElementById('btn-grid');
     var btnBlackout = document.getElementById('btn-blackout');
@@ -1017,6 +1045,24 @@ export async function exportStandalonePresentationHtml(
       if (laserRaf === null) laserRaf = requestAnimationFrame(renderLaserTrailFrame);
     }
 
+    var toolOptionsHidden = false;
+    function syncToolBars() {
+      var isLaser = activeTool === 'laser';
+      var isDraw = activeTool !== 'pointer' && activeTool !== 'laser';
+      btnLaser.classList.toggle('active-red', isLaser);
+      btnDraw.classList.toggle('active-blue', isDraw);
+      laserBar.classList.toggle('is-open', isLaser && !toolOptionsHidden);
+      drawBar.classList.toggle('is-open', isDraw && !toolOptionsHidden);
+      btnShowOpts.style.display = (OPTS.includeAnnotations && (isLaser || isDraw) && toolOptionsHidden) ? 'inline-flex' : 'none';
+      btnShowOpts.title = isLaser ? 'Show Laser Options (O)' : 'Show Drawing Options (O)';
+    }
+
+    function setToolOptionsHidden(val) {
+      toolOptionsHidden = Boolean(val);
+      syncToolBars();
+      if (!toolbarHidden) bumpControls(true);
+    }
+
     function setTool(nextTool) {
       if (!OPTS.includeAnnotations) nextTool = 'pointer';
       activeTool = nextTool;
@@ -1027,11 +1073,7 @@ export async function exportStandalonePresentationHtml(
       annLayer.classList.toggle('cursor-crosshair', activeTool !== 'pointer' && activeTool !== 'laser' && activeTool !== 'eraser');
 
       var isLaser = activeTool === 'laser';
-      var isDraw = activeTool !== 'pointer' && activeTool !== 'laser';
-      btnLaser.classList.toggle('active-red', isLaser);
-      btnDraw.classList.toggle('active-blue', isDraw);
-      laserBar.classList.toggle('is-open', isLaser);
-      drawBar.classList.toggle('is-open', isDraw);
+      syncToolBars();
 
       drawBar.querySelectorAll('[data-tool]').forEach(function(b) {
         b.classList.toggle('active-blue', b.getAttribute('data-tool') === activeTool);
@@ -1052,7 +1094,7 @@ export async function exportStandalonePresentationHtml(
         eraserRing.style.opacity = '0';
         isErasing = false;
       }
-      bumpControls(true);
+      if (!toolbarHidden) bumpControls(true);
     }
 
     function toLocalPt(cx, cy) {
@@ -1203,13 +1245,35 @@ export async function exportStandalonePresentationHtml(
       if (activeTool === 'eraser') { isErasing = false; eraserRing.style.opacity = '0'; }
     });
 
-    // ==================== Dock Auto-Hide ====================
+    // ==================== Dock Auto-Hide & Manual Hide ====================
     var hideTimer = null;
     var dockHovered = false;
     var dockVisible = true;
+    var toolbarHidden = false;
     var lastBump = 0;
 
+    function hideToolbar() {
+      if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+      dockHovered = false;
+      toolbarHidden = true;
+      dockVisible = false;
+      dockWrap.classList.add('is-hidden');
+      dockReveal.classList.add('is-open');
+    }
+
+    function showToolbar() {
+      toolbarHidden = false;
+      dockReveal.classList.remove('is-open');
+      bumpControls(true);
+    }
+
+    function toggleToolbarHidden() {
+      if (toolbarHidden) showToolbar();
+      else hideToolbar();
+    }
+
     function bumpControls(force) {
+      if (toolbarHidden) return;
       var now = performance.now();
       if (!force && dockVisible && now - lastBump < 300) return;
       lastBump = now;
@@ -1218,26 +1282,29 @@ export async function exportStandalonePresentationHtml(
         dockWrap.classList.remove('is-hidden');
       }
       if (hideTimer) clearTimeout(hideTimer);
+      var timeoutMs = activeTool !== 'pointer' ? 2200 : 3000;
       hideTimer = setTimeout(function() {
-        if (!dockHovered && !presenterView) {
+        if (!dockHovered && !presenterView && !toolbarHidden) {
           dockVisible = false;
           dockWrap.classList.add('is-hidden');
         }
-      }, 3000);
+      }, timeoutMs);
     }
 
     dockWrap.addEventListener('mouseenter', function() {
+      if (toolbarHidden) return;
       dockHovered = true;
       dockVisible = true;
       dockWrap.classList.remove('is-hidden');
     });
     dockWrap.addEventListener('mouseleave', function() {
       dockHovered = false;
-      bumpControls(true);
+      if (!toolbarHidden) bumpControls(true);
     });
     window.addEventListener('mousemove', function(e) {
+      if (toolbarHidden || (e.buttons & 1) !== 0) return;
       if (activeTool !== 'pointer') {
-        if (window.innerHeight - e.clientY <= 136) bumpControls(false);
+        if (window.innerHeight - e.clientY <= 104) bumpControls(false);
         return;
       }
       bumpControls(false);
@@ -1319,12 +1386,14 @@ export async function exportStandalonePresentationHtml(
       stageLayout.classList.toggle('is-presenter', presenterView);
       btnNotes.classList.toggle('active-blue', presenterView);
       if (presenterView) {
-        dockVisible = true;
-        dockWrap.classList.remove('is-hidden');
+        if (!toolbarHidden) {
+          dockVisible = true;
+          dockWrap.classList.remove('is-hidden');
+        }
         render(0);
       } else {
         layout();
-        bumpControls(true);
+        if (!toolbarHidden) bumpControls(true);
       }
     }
 
@@ -1422,7 +1491,9 @@ export async function exportStandalonePresentationHtml(
           rows.push(['Arrow / Box', 'A / R (hold Shift)']);
           rows.push(['Stroke Eraser / Pointer', 'E / V']);
           rows.push(['Undo / Clear ink', 'Ctrl+Z / C']);
+          rows.push(['Hide / Show Tool Options', 'O']);
         }
+        rows.push(['Hide / Show Toolbar', 'T']);
         if (OPTS.includePresenterTools) rows.push(['Presenter Notes & Timer', 'N']);
         if (OPTS.includeGridAndBlackout) {
           rows.push(['Slide Grid Overview', 'G']);
@@ -1449,6 +1520,11 @@ export async function exportStandalonePresentationHtml(
     nextBtn.addEventListener('click', function() { step(1); });
     btnLaser.addEventListener('click', function() { setTool(activeTool === 'laser' ? 'pointer' : 'laser'); });
     btnDraw.addEventListener('click', function() { setTool((activeTool !== 'pointer' && activeTool !== 'laser') ? 'pointer' : lastDrawTool); });
+    btnShowOpts.addEventListener('click', function() { setToolOptionsHidden(false); });
+    btnHideDock.addEventListener('click', hideToolbar);
+    dockReveal.addEventListener('click', showToolbar);
+    document.getElementById('laser-hide-opts').addEventListener('click', function() { setToolOptionsHidden(true); });
+    document.getElementById('draw-hide-opts').addEventListener('click', function() { setToolOptionsHidden(true); });
     document.getElementById('laser-close').addEventListener('click', function() { setTool('pointer'); });
     document.getElementById('draw-close').addEventListener('click', function() { setTool('pointer'); });
     btnNotes.addEventListener('click', togglePresenterView);
@@ -1502,6 +1578,7 @@ export async function exportStandalonePresentationHtml(
       else if (k === 'n' || k === 'N') togglePresenterView();
       else if (k === 'g' || k === 'G') toggleGrid();
       else if (k === 'b' || k === 'B') setBlackout(!blackoutOpen);
+      else if (k === 't' || k === 'T') toggleToolbarHidden();
       else if (k === '?') setHelp(!helpOpen);
       else if (OPTS.includeAnnotations) {
         if (k === 'l' || k === 'L') setTool(activeTool === 'laser' ? 'pointer' : 'laser');
@@ -1512,6 +1589,7 @@ export async function exportStandalonePresentationHtml(
         else if (k === 'e' || k === 'E') setTool(activeTool === 'eraser' ? 'pointer' : 'eraser');
         else if (k === 'v' || k === 'V') setTool('pointer');
         else if (k === 'c' || k === 'C') clearAnnotations();
+        else if ((k === 'o' || k === 'O') && activeTool !== 'pointer') setToolOptionsHidden(!toolOptionsHidden);
       }
     }
 

@@ -1,8 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowUpRight,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   Clock,
   Download,
   Eraser,
@@ -112,6 +114,8 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
   const [helpOpen, setHelpOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(true);
+  const [toolbarHidden, setToolbarHidden] = useState(false);
+  const [toolOptionsHidden, setToolOptionsHidden] = useState(false);
   const [noteFontSize, setNoteFontSize] = useState(16);
 
   // Annotation & laser pointer state (stored per slide so navigating preserves drawings)
@@ -127,6 +131,8 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
   const hideTimerRef = useRef<number | null>(null);
   const dockHoveredRef = useRef(false);
   const controlsVisibleRef = useRef(true);
+  const toolbarHiddenRef = useRef(false);
+  toolbarHiddenRef.current = toolbarHidden;
   const lastBumpRef = useRef(0);
   const activeToolRef = useRef<AnnotationTool>('pointer');
   activeToolRef.current = activeTool;
@@ -172,6 +178,7 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
   }, []);
 
   const bumpControls = useCallback((force = false) => {
+    if (toolbarHiddenRef.current) return;
     const now = performance.now();
     if (!force && controlsVisibleRef.current && now - lastBumpRef.current < 300) {
       return;
@@ -182,20 +189,46 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
       setControlsVisible(true);
     }
     if (hideTimerRef.current) window.clearTimeout(hideTimerRef.current);
+    const timeoutMs = activeToolRef.current !== 'pointer' ? 2200 : 3000;
     hideTimerRef.current = window.setTimeout(() => {
-      if (!dockHoveredRef.current) {
+      if (!dockHoveredRef.current && !toolbarHiddenRef.current) {
         controlsVisibleRef.current = false;
         setControlsVisible(false);
       }
-    }, 3000);
+    }, timeoutMs);
   }, []);
+
+  const hideToolbar = useCallback(() => {
+    if (hideTimerRef.current) {
+      window.clearTimeout(hideTimerRef.current);
+      hideTimerRef.current = null;
+    }
+    dockHoveredRef.current = false;
+    toolbarHiddenRef.current = true;
+    controlsVisibleRef.current = false;
+    setToolbarHidden(true);
+    setControlsVisible(false);
+  }, []);
+
+  const showToolbar = useCallback(() => {
+    toolbarHiddenRef.current = false;
+    setToolbarHidden(false);
+    bumpControls(true);
+  }, [bumpControls]);
+
+  const toggleToolbarHidden = useCallback(() => {
+    if (toolbarHiddenRef.current) showToolbar();
+    else hideToolbar();
+  }, [hideToolbar, showToolbar]);
 
   const handleStageMouseMove = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
+      // Never auto-reveal while manually hidden or while actively drawing/pressing mouse button
+      if (toolbarHiddenRef.current || (e.buttons & 1) !== 0) return;
       // While using Laser or Drawing tools, avoid popping up the dock on every slide pointer move;
       // bring it back smoothly whenever the cursor approaches the bottom dock area.
       if (activeToolRef.current !== 'pointer') {
-        if (window.innerHeight - e.clientY <= 136) {
+        if (window.innerHeight - e.clientY <= 104) {
           bumpControls(false);
         }
         return;
@@ -218,7 +251,9 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
       if (next !== 'pointer' && next !== 'laser') {
         setLastDrawTool(next);
       }
-      bumpControls(true);
+      if (!toolbarHiddenRef.current) {
+        bumpControls(true);
+      }
     },
     [bumpControls]
   );
@@ -330,6 +365,13 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
         selectTool('pointer');
       } else if (key === 'c' || key === 'C') {
         handleClearSlideAnnotations();
+      } else if (key === 't' || key === 'T') {
+        toggleToolbarHidden();
+      } else if (key === 'o' || key === 'O') {
+        if (activeTool !== 'pointer') {
+          setToolOptionsHidden((v) => !v);
+          if (!toolbarHiddenRef.current) bumpControls(true);
+        }
       } else if (key === '?') {
         setHelpOpen((v) => !v);
       }
@@ -337,6 +379,7 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
     [
       activeTool,
       blackout,
+      bumpControls,
       currentIndex,
       goTo,
       gridOpen,
@@ -347,6 +390,7 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
       slides.length,
       step,
       toggleFullscreen,
+      toggleToolbarHidden,
     ]
   );
 
@@ -543,9 +587,23 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
         </div>
       )}
 
-      {/* Floating Accessible Control Bar & Separate Contextual Sub-Bars */}
+      {/* Discreet Bottom-Center Reveal Handle When Toolbar Is Manually Hidden */}
+      {toolbarHidden && (
+        <button
+          type="button"
+          onClick={showToolbar}
+          className="fixed bottom-2 left-1/2 -translate-x-1/2 z-30 h-7 px-2.5 inline-flex items-center gap-1 rounded-lg bg-slate-900/80 border border-slate-700/70 text-slate-300 hover:text-white hover:bg-slate-900 opacity-15 hover:opacity-100 focus-visible:opacity-100 transition-opacity duration-200 cursor-pointer backdrop-blur-sm"
+          aria-label="Show presentation toolbar (T)"
+          title="Show Toolbar (T)"
+        >
+          <ChevronUp className="w-3.5 h-3.5" />
+        </button>
+      )}
+
+      {/* Floating Accessible Control Bar & Separate Collapsible Contextual Sub-Bars */}
       <div
         onMouseEnter={() => {
+          if (toolbarHiddenRef.current) return;
           dockHoveredRef.current = true;
           if (!controlsVisibleRef.current) {
             controlsVisibleRef.current = true;
@@ -554,14 +612,18 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
         }}
         onMouseLeave={() => {
           dockHoveredRef.current = false;
-          bumpControls(true);
+          if (!toolbarHiddenRef.current) {
+            bumpControls(true);
+          }
         }}
-        className={`fixed bottom-3 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-1.5 max-w-[96vw] transition-opacity duration-200 ${
-          controlsVisible || presenterView ? 'opacity-100' : 'opacity-0 pointer-events-none'
+        className={`fixed bottom-3 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-1.5 max-w-[96vw] transition-[opacity,transform] duration-200 ${
+          !toolbarHidden && (controlsVisible || presenterView)
+            ? 'opacity-100 translate-y-0'
+            : 'opacity-0 translate-y-2 pointer-events-none'
         }`}
       >
-        {/* 1. Separate Compact Laser Color Bar (shown only when Laser is active) */}
-        {isLaserActive && (
+        {/* 1. Separate Compact Laser Color Bar (collapsible without turning off Laser) */}
+        {isLaserActive && !toolOptionsHidden && (
           <div
             role="toolbar"
             aria-label="Laser pointer options"
@@ -594,6 +656,15 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
             <span className="w-px h-4 bg-slate-700 mx-0.5" aria-hidden="true" />
             <button
               type="button"
+              onClick={() => setToolOptionsHidden(true)}
+              className="w-6 h-6 inline-flex items-center justify-center rounded-md text-slate-400 hover:bg-slate-800 hover:text-white cursor-pointer shrink-0"
+              aria-label="Hide laser options (O)"
+              title="Hide Laser Options (O)"
+            >
+              <ChevronDown className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
               onClick={() => selectTool('pointer')}
               className="w-6 h-6 inline-flex items-center justify-center rounded-md text-slate-400 hover:bg-slate-800 hover:text-white cursor-pointer shrink-0"
               aria-label="Turn off laser (Esc)"
@@ -604,8 +675,8 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
           </div>
         )}
 
-        {/* 2. Separate Compact Drawing Bar (no redundant Laser/Pointer buttons) */}
-        {isDrawingToolActive && (
+        {/* 2. Separate Compact Drawing Bar (collapsible without turning off active drawing tool) */}
+        {isDrawingToolActive && !toolOptionsHidden && (
           <div
             role="toolbar"
             aria-label="Drawing tools"
@@ -721,6 +792,16 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
 
             <button
               type="button"
+              onClick={() => setToolOptionsHidden(true)}
+              className="w-7 h-7 inline-flex items-center justify-center rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white cursor-pointer shrink-0"
+              aria-label="Hide drawing options (O)"
+              title="Hide Drawing Options (O)"
+            >
+              <ChevronDown className="w-3.5 h-3.5" />
+            </button>
+
+            <button
+              type="button"
               onClick={() => selectTool('pointer')}
               className="w-7 h-7 inline-flex items-center justify-center rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white cursor-pointer shrink-0"
               aria-label="Done drawing (Esc)"
@@ -792,6 +873,19 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
           >
             <Pen className="w-4 h-4" />
           </button>
+
+          {/* Compact Toggle to Re-Expand Hidden Laser / Drawing Options */}
+          {(isLaserActive || isDrawingToolActive) && toolOptionsHidden && (
+            <button
+              type="button"
+              onClick={() => setToolOptionsHidden(false)}
+              className="w-7 h-8 sm:h-9 inline-flex items-center justify-center rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white cursor-pointer shrink-0"
+              aria-label="Show tool options (O)"
+              title={isLaserActive ? 'Show Laser Options (O)' : 'Show Drawing Options (O)'}
+            >
+              <ChevronUp className="w-3.5 h-3.5" />
+            </button>
+          )}
 
           <span className="w-px h-4 bg-slate-700 mx-0.5 shrink-0" aria-hidden="true" />
 
@@ -867,6 +961,16 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
               <Download className="w-4 h-4" />
             </button>
           )}
+
+          <button
+            type="button"
+            onClick={hideToolbar}
+            className="w-8 h-8 sm:w-9 sm:h-9 inline-flex items-center justify-center rounded-lg text-slate-300 hover:bg-slate-800 cursor-pointer shrink-0"
+            aria-label="Hide toolbar (T)"
+            title="Hide Toolbar (T)"
+          >
+            <ChevronDown className="w-4 h-4" />
+          </button>
 
           <span className="w-px h-4 bg-slate-700 mx-0.5 shrink-0" aria-hidden="true" />
 
@@ -980,6 +1084,8 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
                 ['Arrow / Box', 'A / R (hold Shift to snap)'],
                 ['Stroke Eraser / Pointer', 'E / V'],
                 ['Undo / Clear slide ink', 'Ctrl+Z / C'],
+                ['Hide / Show Tool Options', 'O'],
+                ['Hide / Show Toolbar', 'T'],
                 ['Presenter Notes & Timer', 'N'],
                 ['Slide Grid Overview', 'G'],
                 ['Blackout Screen', 'B'],
