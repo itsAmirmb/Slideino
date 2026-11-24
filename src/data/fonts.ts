@@ -183,20 +183,22 @@ export function buildGoogleFontUrl(option: FontOption): string {
 }
 
 /**
- * Inspects slide HTML/CSS for any catalog Google Fonts referenced in font-family declarations,
- * skipping any font names already provided via @font-face in sharedCss or the slide HTML itself.
+ * Inspects slide HTML/CSS (plus optional theme font tokens) for any catalog Google Fonts referenced
+ * in font-family declarations, skipping any font names already provided via @font-face in sharedCss
+ * or the slide HTML itself, and skipping any already loaded by an explicit Google Fonts <link>.
  */
 export function buildAutoGoogleFontsLink(
   html: string,
   css: string,
-  sharedCss?: string
+  sharedCss?: string,
+  extraFontSources?: string
 ): string {
-  const combinedSource = `${html}\n${css}`;
+  const combinedSource = `${html}\n${css}\n${extraFontSources || ''}`;
   if (!combinedSource.trim()) return '';
 
   // Collect fonts already defined via @font-face so we never override embedded local/base64 fonts
   const embeddedFonts = new Set<string>();
-  const fontFaceSource = `${sharedCss || ''}\n${combinedSource}`;
+  const fontFaceSource = `${sharedCss || ''}\n${html}\n${css}`;
   const ffRegex = /@font-face\s*\{[^}]*font-family\s*:\s*['"]?([^'";}]+)['"]?/gi;
   let ffMatch: RegExpExecArray | null;
   while ((ffMatch = ffRegex.exec(fontFaceSource)) !== null) {
@@ -204,17 +206,25 @@ export function buildAutoGoogleFontsLink(
     if (clean) embeddedFonts.add(clean);
   }
 
+  // Also skip families already explicitly requested via a Google Fonts <link> in standalone HTML
+  const existingGFontLinks = (
+    html.match(/https?:\/\/fonts\.googleapis\.com\/css2?\?[^"'<>]+/gi) || []
+  )
+    .join(' ')
+    .toLowerCase();
+
   const specs: string[] = [];
   const lowerSource = combinedSource.toLowerCase();
 
   for (const font of FONT_CATALOG) {
     const lowerName = font.name.toLowerCase();
     if (embeddedFonts.has(lowerName)) continue;
+    if (existingGFontLinks.includes(lowerName.replace(/\s+/g, '+'))) continue;
     if (lowerSource.includes(lowerName)) {
       specs.push(`family=${font.googleSpec}`);
     }
   }
 
   if (specs.length === 0) return '';
-  return `<link rel="stylesheet" href="https://fonts.googleapis.com/css2?${specs.join('&')}&display=swap" data-slideino-autofont="true">`;
+  return `<link rel="preconnect" href="https://fonts.googleapis.com">\n<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n<link rel="stylesheet" href="https://fonts.googleapis.com/css2?${specs.join('&')}&display=swap" data-slideino-autofont="true">`;
 }

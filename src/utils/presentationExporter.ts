@@ -413,13 +413,19 @@ export async function exportStandalonePresentationHtml(
     .size-btn.is-selected { background: #334155; color: #ffffff; }
     .size-dot { border-radius: 9999px; background: currentColor; display: block; }
 
-    /* Blackout, Grid & Shortcuts Overlays */
+    /* Blackout, Ended Screen, Grid & Shortcuts Overlays */
     #blackout {
       position: fixed; inset: 0; z-index: 45; background: #000000;
       display: none; align-items: flex-end; justify-content: center;
       padding-bottom: 32px; cursor: pointer; font-size: 12px; color: #475569;
     }
     #blackout.is-open { display: flex; }
+    #ended-screen {
+      position: fixed; inset: 0; z-index: 46; background: #020617;
+      display: none; flex-direction: column; align-items: center; justify-content: center;
+      text-align: center; padding: 24px; gap: 12px;
+    }
+    #ended-screen.is-open { display: flex; }
 
     .modal-backdrop {
       position: fixed; inset: 0; z-index: 50;
@@ -684,6 +690,23 @@ export async function exportStandalonePresentationHtml(
 
   <div id="blackout">Screen blacked out — press B or click anywhere to resume</div>
 
+  <div id="ended-screen" role="status" aria-live="polite">
+    <div style="width:48px; height:48px; border-radius:14px; background:#0f172a; border:1px solid #1e293b; display:flex; align-items:center; justify-content:center; color:#94a3b8; margin-bottom:4px;">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 17H4a2 2 0 0 1-2-2V5c0-1.5 1-2 1-2"/><path d="M22 15V5a2 2 0 0 0-2-2H9"/><path d="M8 21h8"/><path d="M12 17v4"/><path d="m2 2 20 20"/></svg>
+    </div>
+    <div style="font-size:18px; font-weight:600; color:#ffffff;">Presentation ended</div>
+    <div style="font-size:13px; color:#94a3b8; max-width:420px; line-height:1.55;">
+      The presenter closed the presentation. You can close this tab, or leave it open to reconnect automatically when they present again.
+    </div>
+    <div style="display:flex; gap:10px; margin-top:8px;">
+      <button type="button" class="p-btn-primary" id="ended-close-tab">Close Tab</button>
+      <button type="button" class="p-btn-sm" id="ended-resume" style="height:32px; padding:0 14px;">Resume Slide View</button>
+    </div>
+    <div id="ended-close-hint" style="display:none; font-size:11px; color:#64748b; margin-top:4px;">
+      Your browser prevents tabs from closing themselves — press Ctrl+W or Cmd+W to close this tab.
+    </div>
+  </div>
+
   <div id="grid-modal" class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Slide overview">
     <div class="grid-inner">
       <div class="grid-header">
@@ -769,6 +792,10 @@ export async function exportStandalonePresentationHtml(
     var audBannerDot = document.getElementById('aud-banner-dot');
     var audBannerText = document.getElementById('aud-banner-text');
     var audBannerClose = document.getElementById('aud-banner-close');
+    var endedScreen = document.getElementById('ended-screen');
+    var endedCloseTab = document.getElementById('ended-close-tab');
+    var endedResume = document.getElementById('ended-resume');
+    var endedCloseHint = document.getElementById('ended-close-hint');
 
     // Dual-Window Audience vs Presenter mode detection
     var urlParams = new URLSearchParams(window.location.search || '');
@@ -866,7 +893,7 @@ export async function exportStandalonePresentationHtml(
       var s = elapsedSec % 60;
       timerVal.textContent = (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
     }
-    setInterval(function() {
+    var timerIntervalId = setInterval(function() {
       if (timerRunning && presenterView) {
         elapsedSec += 1;
         renderTimer();
@@ -1553,12 +1580,53 @@ export async function exportStandalonePresentationHtml(
     }
 
     // ==================== Dual-Window Sync Bridge ====================
+    var syncClosed = false;
+    var presentationEnded = false;
+    var syncHeartbeatId = null;
+
+    function setAudienceEnded(ended) {
+      if (!isAudienceMode) return;
+      presentationEnded = Boolean(ended);
+      endedScreen.classList.toggle('is-open', presentationEnded);
+      if (presentationEnded) {
+        blackoutOpen = false;
+        applyBlackoutVisual();
+        audienceBanner.classList.remove('is-open');
+        dockWrap.style.display = 'none';
+        dockReveal.classList.remove('is-open');
+        laserDot.style.opacity = '0';
+        try {
+          frame.srcdoc = '';
+          frame.src = 'about:blank';
+        } catch (_) {}
+        if (document.fullscreenElement && document.exitFullscreen) {
+          document.exitFullscreen().catch(function() {});
+        }
+      } else {
+        endedCloseHint.style.display = 'none';
+        dockWrap.style.display = '';
+        render(0);
+      }
+    }
+
+    if (endedCloseTab) {
+      endedCloseTab.addEventListener('click', function() {
+        window.close();
+        setTimeout(function() { endedCloseHint.style.display = 'block'; }, 180);
+      });
+    }
+    if (endedResume) {
+      endedResume.addEventListener('click', function() {
+        setAudienceEnded(false);
+      });
+    }
+
     function updateSyncUi() {
       var now = Date.now();
       var audCount = 0;
       var presCount = 0;
       Object.keys(syncPeers).forEach(function(k) {
-        if (now - syncPeers[k].lastSeen > 12000) delete syncPeers[k];
+        if (now - syncPeers[k].lastSeen > 5500) delete syncPeers[k];
         else if (syncPeers[k].role === 'audience') audCount++;
         else presCount++;
       });
@@ -1580,6 +1648,7 @@ export async function exportStandalonePresentationHtml(
     }
 
     function sendSync(payload, skipStorage) {
+      if (syncClosed) return;
       syncSeq += 1;
       var env = { channel: syncChannelName, senderId: syncSenderId, seq: syncSeq, ts: Date.now(), payload: payload };
       if (syncBc) {
@@ -1614,22 +1683,33 @@ export async function exportStandalonePresentationHtml(
     }
 
     function handleIncomingSync(env) {
-      if (!env || env.channel !== syncChannelName || env.senderId === syncSenderId || !env.payload) return;
+      if (syncClosed || !env || env.channel !== syncChannelName || env.senderId === syncSenderId || !env.payload) return;
       if (seenSyncSeq[env.senderId] && env.seq <= seenSyncSeq[env.senderId]) return;
       seenSyncSeq[env.senderId] = env.seq;
       var p = env.payload;
+      if (p.type === 'presentation-ended') {
+        delete syncPeers[env.senderId];
+        updateSyncUi();
+        if (isAudienceMode) setAudienceEnded(true);
+        return;
+      }
       if (p.type === 'hello' || p.type === 'ping') {
         syncPeers[env.senderId] = { role: p.role, lastSeen: Date.now() };
         updateSyncUi();
         sendSync({ type: 'pong', role: syncRole });
         if (p.type === 'hello' && !isAudienceMode) {
           broadcastState(true);
+        } else if (isAudienceMode && p.role === 'presenter' && presentationEnded) {
+          setAudienceEnded(false);
         }
         return;
       }
       if (p.type === 'pong') {
         syncPeers[env.senderId] = { role: p.role, lastSeen: Date.now() };
         updateSyncUi();
+        if (isAudienceMode && p.role === 'presenter' && presentationEnded) {
+          setAudienceEnded(false);
+        }
         return;
       }
       if (p.type === 'goodbye') {
@@ -1639,6 +1719,9 @@ export async function exportStandalonePresentationHtml(
       }
       if (syncPeers[env.senderId]) syncPeers[env.senderId].lastSeen = Date.now();
       if (p.type === 'state' && p.state) {
+        if (isAudienceMode && presentationEnded) {
+          setAudienceEnded(false);
+        }
         var targetIdx = Math.max(0, Math.min(slides.length - 1, Number(p.state.slideIndex || 0)));
         if (targetIdx !== index) {
           var dir = targetIdx >= index ? 1 : -1;
@@ -1672,6 +1755,39 @@ export async function exportStandalonePresentationHtml(
       }
     }
 
+    function teardownPresentation() {
+      if (syncClosed) return;
+      if (!isAudienceMode) {
+        sendSync({ type: 'presentation-ended', role: syncRole });
+      }
+      sendSync({ type: 'goodbye', role: syncRole });
+      try { localStorage.removeItem(syncStorageKey); } catch (_) {}
+      syncClosed = true;
+      if (syncHeartbeatId !== null) {
+        clearInterval(syncHeartbeatId);
+        syncHeartbeatId = null;
+      }
+      if (timerIntervalId) {
+        clearInterval(timerIntervalId);
+        timerIntervalId = null;
+      }
+      if (syncBc) {
+        try {
+          syncBc.onmessage = null;
+          syncBc.close();
+        } catch (_) {}
+        syncBc = null;
+      }
+      try {
+        frame.srcdoc = '';
+        frame.src = 'about:blank';
+        if (nextFrame) {
+          nextFrame.srcdoc = '';
+          nextFrame.src = 'about:blank';
+        }
+      } catch (_) {}
+    }
+
     if (typeof BroadcastChannel !== 'undefined') {
       try {
         syncBc = new BroadcastChannel(syncChannelName);
@@ -1682,13 +1798,18 @@ export async function exportStandalonePresentationHtml(
       if (ev.key !== syncStorageKey || !ev.newValue) return;
       try { handleIncomingSync(JSON.parse(ev.newValue)); } catch (_) {}
     });
-    window.addEventListener('pagehide', function() { sendSync({ type: 'goodbye', role: syncRole }); });
-    window.addEventListener('beforeunload', function() { sendSync({ type: 'goodbye', role: syncRole }); });
-    sendSync({ type: 'hello', role: syncRole });
-    setInterval(function() {
+    document.addEventListener('visibilitychange', function() {
+      if (syncClosed || document.visibilityState !== 'visible') return;
       sendSync({ type: 'ping', role: syncRole }, Boolean(syncBc));
       updateSyncUi();
-    }, 4000);
+    });
+    window.addEventListener('pagehide', teardownPresentation);
+    window.addEventListener('beforeunload', teardownPresentation);
+    sendSync({ type: 'hello', role: syncRole });
+    syncHeartbeatId = setInterval(function() {
+      sendSync({ type: 'ping', role: syncRole }, Boolean(syncBc));
+      updateSyncUi();
+    }, 2000);
 
     if (btnCopyAudience) {
       btnCopyAudience.addEventListener('click', function() {
@@ -1704,6 +1825,7 @@ export async function exportStandalonePresentationHtml(
     pBlackoutPreview.addEventListener('click', function() { setBlackout(false); });
 
     var gridBuilt = false;
+    var gridObserver = null;
     function toggleGrid(force) {
       if (!OPTS.includeGridAndBlackout) return;
       gridOpen = typeof force === 'boolean' ? force : !gridOpen;
@@ -1715,6 +1837,21 @@ export async function exportStandalonePresentationHtml(
         if (!gridBuilt) {
           gridBuilt = true;
           gridCards.innerHTML = '';
+          if (typeof IntersectionObserver !== 'undefined') {
+            gridObserver = new IntersectionObserver(function(entries) {
+              entries.forEach(function(entry) {
+                if (!entry.isIntersecting) return;
+                var el = entry.target;
+                var sIdx = parseInt(el.getAttribute('data-slide-idx') || '-1', 10);
+                var sObj = slides[sIdx];
+                if (sObj && !el.getAttribute('data-loaded')) {
+                  el.setAttribute('data-loaded', '1');
+                  el.srcdoc = composeSlideDoc(sObj.doc);
+                }
+                gridObserver.unobserve(el);
+              });
+            }, { root: gridModal, rootMargin: '200px' });
+          }
           slides.forEach(function(s, idx) {
             var card = document.createElement('button');
             card.type = 'button';
@@ -1722,15 +1859,22 @@ export async function exportStandalonePresentationHtml(
             card.setAttribute('data-idx', String(idx));
             var thumb = document.createElement('div');
             thumb.className = 'grid-thumb';
+            thumb.style.background = s.bg || '#000000';
             var ifr = document.createElement('iframe');
             ifr.setAttribute('sandbox', 'allow-scripts');
             ifr.setAttribute('loading', 'lazy');
             ifr.setAttribute('tabindex', '-1');
+            ifr.setAttribute('data-slide-idx', String(idx));
             ifr.title = 'Slide ' + (idx + 1);
             var tw = s.width || 1280, th = s.height || 720;
             ifr.style.width = tw + 'px';
             ifr.style.height = th + 'px';
-            ifr.srcdoc = composeSlideDoc(s.doc);
+            if (gridObserver) {
+              gridObserver.observe(ifr);
+            } else {
+              ifr.setAttribute('data-loaded', '1');
+              ifr.srcdoc = composeSlideDoc(s.doc);
+            }
             thumb.appendChild(ifr);
             var meta = document.createElement('div');
             meta.className = 'grid-meta';

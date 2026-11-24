@@ -139,6 +139,8 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
   const [syncedPresenterCount, setSyncedPresenterCount] = useState(0);
   const [copiedAudienceLink, setCopiedAudienceLink] = useState(false);
   const [showAudienceBanner, setShowAudienceBanner] = useState(isAudienceMode);
+  const [presentationEnded, setPresentationEnded] = useState(false);
+  const [closeTabHint, setCloseTabHint] = useState(false);
 
   // Annotation & laser pointer state (stored per slide so navigating preserves drawings)
   const [activeTool, setActiveTool] = useState<AnnotationTool>('pointer');
@@ -249,8 +251,24 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
       if (fs && isAudienceMode) setShowAudienceBanner(false);
     };
     document.addEventListener('fullscreenchange', onFsChange);
-    return () => document.removeEventListener('fullscreenchange', onFsChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', onFsChange);
+      if (document.fullscreenElement) {
+        document.exitFullscreen?.().catch(() => {});
+      }
+    };
   }, [isAudienceMode]);
+
+  const handleExitPresentation = useCallback(() => {
+    if (document.fullscreenElement) {
+      document.exitFullscreen?.().catch(() => {});
+    }
+    if (!isAudienceMode) {
+      syncBridgeRef.current?.close({ endPresentation: true });
+      syncBridgeRef.current = null;
+    }
+    onExit(currentIndexRef.current);
+  }, [isAudienceMode, onExit]);
 
   const bumpControls = useCallback((force = false) => {
     if (toolbarHiddenRef.current) return;
@@ -348,16 +366,39 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
         setSyncedPresenterCount(presCount);
       },
       onMessage: (msg) => {
-        if (msg.type === 'hello' && viewRole === 'presenter') {
-          // Immediately push full authoritative state to newly opened Audience Window
-          bridge.send({
-            type: 'state',
-            state: {
-              slideIndex: currentIndexRef.current,
-              blackout: blackoutRef.current,
-              annotationsBySlide: annotationsBySlideRef.current,
-            },
-          });
+        if (msg.type === 'presentation-ended') {
+          if (isAudienceMode) {
+            setPresentationEnded(true);
+            setBlackout(false);
+            setShowAudienceBanner(false);
+            remoteLaserRef.current?.hide();
+            if (document.fullscreenElement) {
+              document.exitFullscreen?.().catch(() => {});
+            }
+          }
+          return;
+        }
+        if (msg.type === 'hello') {
+          if (viewRole === 'presenter') {
+            // Immediately push full authoritative state to newly opened Audience Window
+            bridge.send({
+              type: 'state',
+              state: {
+                slideIndex: currentIndexRef.current,
+                blackout: blackoutRef.current,
+                annotationsBySlide: annotationsBySlideRef.current,
+              },
+            });
+          } else if (msg.role === 'presenter') {
+            // Presenter restarted presentation -> automatically resume Audience Window
+            setPresentationEnded(false);
+            setCloseTabHint(false);
+          }
+          return;
+        }
+        if (msg.type === 'pong' && isAudienceMode && msg.role === 'presenter') {
+          setPresentationEnded(false);
+          setCloseTabHint(false);
           return;
         }
         if (msg.type === 'state') {
@@ -368,6 +409,8 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
             setAnnotationsBySlide(msg.state.annotationsBySlide);
           }
           if (isAudienceMode) {
+            setPresentationEnded(false);
+            setCloseTabHint(false);
             setShowAudienceBanner(false);
           }
           return;
@@ -383,7 +426,7 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
     });
     syncBridgeRef.current = bridge;
     return () => {
-      bridge.close();
+      bridge.close({ endPresentation: viewRole === 'presenter' });
       syncBridgeRef.current = null;
     };
   }, [effectiveSyncId, viewRole, slides.length, isAudienceMode]);
@@ -488,7 +531,7 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
         else if (gridOpen) setGridOpen(false);
         else if (blackout) toggleBlackout(false);
         else if (activeTool !== 'pointer') selectTool('pointer');
-        else if (!isAudienceMode) onExit(currentIndex);
+        else if (!isAudienceMode) handleExitPresentation();
         return;
       }
       if (key === 'ArrowRight' || key === ' ' || key === 'PageDown' || key === 'ArrowDown') {
@@ -548,9 +591,9 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
       goTo,
       gridOpen,
       handleClearSlideAnnotations,
+      handleExitPresentation,
       helpOpen,
       isAudienceMode,
-      onExit,
       selectTool,
       slides.length,
       step,
@@ -812,17 +855,58 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
             if (isAudienceMode && showAudienceBanner) setShowAudienceBanner(false);
           }}
         >
-          <SlideFrame
-            slide={currentSlide}
-            theme={theme}
-            libraries={deck.libraries}
-            customResources={deck.customResources}
-            sharedCss={deck.sharedCss}
-            aspectRatio={deck.aspectRatio}
-            overlay={annotationOverlay}
-            onForwardKey={handleKeyAction}
-          />
-          {isAudienceMode && showAudienceBanner && !blackout && (
+          {isAudienceMode && presentationEnded ? (
+            <div className="flex flex-col items-center justify-center text-center max-w-md px-6 py-8">
+              <div className="w-12 h-12 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center mb-4">
+                <MonitorOff className="w-5 h-5 text-slate-400" aria-hidden="true" />
+              </div>
+              <h1 className="font-display text-lg font-semibold text-white">
+                Presentation ended
+              </h1>
+              <p className="text-xs text-slate-400 mt-2 leading-relaxed">
+                The presenter closed the presentation. You can close this tab, or leave it open to reconnect automatically when they present again.
+              </p>
+              <div className="flex items-center gap-2.5 mt-5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    window.close();
+                    window.setTimeout(() => setCloseTabHint(true), 180);
+                  }}
+                  className="h-9 px-4 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium transition-colors cursor-pointer"
+                >
+                  Close Tab
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPresentationEnded(false);
+                    setCloseTabHint(false);
+                  }}
+                  className="h-9 px-4 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition-colors cursor-pointer"
+                >
+                  Resume Slide View
+                </button>
+              </div>
+              {closeTabHint && (
+                <p className="text-[11px] text-slate-500 mt-3">
+                  Your browser prevents tabs from closing themselves — press Ctrl+W or Cmd+W to close this tab.
+                </p>
+              )}
+            </div>
+          ) : (
+            <SlideFrame
+              slide={currentSlide}
+              theme={theme}
+              libraries={deck.libraries}
+              customResources={deck.customResources}
+              sharedCss={deck.sharedCss}
+              aspectRatio={deck.aspectRatio}
+              overlay={annotationOverlay}
+              onForwardKey={handleKeyAction}
+            />
+          )}
+          {isAudienceMode && showAudienceBanner && !blackout && !presentationEnded && (
             <div className="fixed top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 px-4 py-2 rounded-xl bg-slate-900/95 border border-slate-700/80 text-xs text-slate-200 shadow-2xl backdrop-blur-md">
               <span
                 className={`w-2 h-2 rounded-full shrink-0 ${
@@ -844,7 +928,7 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
               </button>
             </div>
           )}
-          {blackout && (
+          {blackout && !presentationEnded && (
             <div
               onClick={() => toggleBlackout(false)}
               className="absolute inset-0 bg-black z-20 flex items-end justify-center pb-8 cursor-pointer"
@@ -860,7 +944,7 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
       )}
 
       {/* Discreet Bottom-Center Reveal Handle When Toolbar Is Manually Hidden */}
-      {toolbarHidden && (
+      {toolbarHidden && !(isAudienceMode && presentationEnded) && (
         <button
           type="button"
           onClick={showToolbar}
@@ -873,6 +957,7 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
       )}
 
       {/* Floating Accessible Control Bar & Separate Collapsible Contextual Sub-Bars */}
+      {!(isAudienceMode && presentationEnded) && (
       <div
         onMouseEnter={() => {
           if (toolbarHiddenRef.current) return;
@@ -1284,7 +1369,7 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
 
               <button
                 type="button"
-                onClick={() => onExit(currentIndex)}
+                onClick={handleExitPresentation}
                 className="px-2.5 h-8 sm:h-9 inline-flex items-center gap-1 rounded-lg text-xs font-medium text-slate-200 hover:bg-slate-800 cursor-pointer whitespace-nowrap shrink-0"
                 aria-label="Exit presentation (Escape)"
               >
@@ -1295,6 +1380,7 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
           )}
         </nav>
       </div>
+      )}
 
       {/* Grid Overview Modal */}
       {gridOpen && (

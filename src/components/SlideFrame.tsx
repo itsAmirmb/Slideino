@@ -112,6 +112,10 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(
     } | null>(null);
     const [runtimeError, setRuntimeError] = useState<string | null>(null);
     const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
+    // Native loading="lazy" is ignored on srcDoc iframes; gate thumbnails with IntersectionObserver + idle yield
+    const [inViewport, setInViewport] = useState(!isThumbnail);
+    const [idleReady, setIdleReady] = useState(!isThumbnail);
+    const shouldMountIframe = !isThumbnail || (inViewport && idleReady);
 
     useImperativeHandle(
       ref,
@@ -153,6 +157,62 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(
       });
       ro.observe(el);
       return () => ro.disconnect();
+    }, []);
+
+    // Lazy-mount offscreen thumbnail iframes only when scrolled near viewport
+    useEffect(() => {
+      if (!isThumbnail) {
+        setInViewport(true);
+        setIdleReady(true);
+        return;
+      }
+      if (inViewport) return;
+      const el = containerRef.current;
+      if (!el || typeof IntersectionObserver === 'undefined') {
+        setInViewport(true);
+        return;
+      }
+      const io = new IntersectionObserver(
+        (entries) => {
+          if (entries.some((entry) => entry.isIntersecting)) {
+            setInViewport(true);
+            io.disconnect();
+          }
+        },
+        { rootMargin: '240px' }
+      );
+      io.observe(el);
+      return () => io.disconnect();
+    }, [isThumbnail, inViewport]);
+
+    // Yield thumbnail iframe mounting until the main stage has had priority to paint
+    useEffect(() => {
+      if (!isThumbnail || !inViewport || idleReady) return;
+      const win = window as Window & {
+        requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+        cancelIdleCallback?: (id: number) => void;
+      };
+      if (typeof win.requestIdleCallback === 'function') {
+        const id = win.requestIdleCallback(() => setIdleReady(true), { timeout: 220 });
+        return () => win.cancelIdleCallback?.(id);
+      }
+      const timerId = window.setTimeout(() => setIdleReady(true), 60);
+      return () => window.clearTimeout(timerId);
+    }, [isThumbnail, inViewport, idleReady]);
+
+    // Guarantee any active timers, animations, or media inside the slide iframe stop immediately on unmount
+    useEffect(() => {
+      return () => {
+        const frame = iframeRef.current;
+        if (frame) {
+          try {
+            frame.srcdoc = '';
+            frame.src = 'about:blank';
+          } catch {
+            // Ignore cross-origin / detached frame cleanup errors
+          }
+        }
+      };
     }, []);
 
     // Reset error when slide changes
@@ -249,6 +309,7 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(
     const origin = typeof window !== 'undefined' ? window.location.origin : '';
 
     const srcDoc = useMemo(() => {
+      if (!shouldMountIframe) return '';
       const metaKey = JSON.stringify({
         slideId: slide.id,
         css: slide.css,
@@ -322,6 +383,7 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(
       isAuto,
       staticAutoDims,
       prefersReducedMotion,
+      shouldMountIframe,
     ]);
 
     // Reset live measured dimensions whenever the slide document reloads or aspectRatio changes
@@ -380,25 +442,34 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(
             backgroundColor: slide.backgroundOverride || theme.tokens.bg,
           }}
         >
-          <iframe
-            ref={iframeRef}
-            title={isThumbnail ? `Thumbnail: ${slide.title}` : `Slide: ${slide.title}`}
-            srcDoc={srcDoc}
-            sandbox="allow-scripts"
-            loading={isThumbnail ? 'lazy' : 'eager'}
-            tabIndex={isThumbnail ? -1 : 0}
-            className={`border-0 block ${isThumbnail ? 'pointer-events-none select-none' : ''}`}
-            style={
-              isFluid
-                ? { width: '100%', height: '100%' }
-                : {
-                    width: `${baseDims.width}px`,
-                    height: `${baseDims.height}px`,
-                    transform: `scale(${scale})`,
-                    transformOrigin: 'top left',
-                  }
-            }
-          />
+          {shouldMountIframe ? (
+            <iframe
+              ref={iframeRef}
+              title={isThumbnail ? `Thumbnail: ${slide.title}` : `Slide: ${slide.title}`}
+              srcDoc={srcDoc}
+              sandbox="allow-scripts"
+              loading={isThumbnail ? 'lazy' : 'eager'}
+              tabIndex={isThumbnail ? -1 : 0}
+              className={`border-0 block ${isThumbnail ? 'pointer-events-none select-none' : ''}`}
+              style={
+                isFluid
+                  ? { width: '100%', height: '100%' }
+                  : {
+                      width: `${baseDims.width}px`,
+                      height: `${baseDims.height}px`,
+                      transform: `scale(${scale})`,
+                      transformOrigin: 'top left',
+                    }
+              }
+            />
+          ) : (
+            <div
+              aria-hidden="true"
+              className="w-full h-full flex items-center justify-center p-2 opacity-60"
+            >
+              <div className="w-2/3 h-2 rounded-full bg-slate-400/20" />
+            </div>
+          )}
 
           {!isThumbnail && overlay}
 

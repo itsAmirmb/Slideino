@@ -19,6 +19,7 @@ export interface SyncLaserPayload {
 export type SyncMessagePayload =
   | { type: 'hello'; role: SyncWindowRole }
   | { type: 'goodbye'; role: SyncWindowRole }
+  | { type: 'presentation-ended'; role: SyncWindowRole }
   | { type: 'ping'; role: SyncWindowRole }
   | { type: 'pong'; role: SyncWindowRole }
   | { type: 'state'; state: SyncPresentationState; requestAck?: boolean }
@@ -42,7 +43,7 @@ export interface PresentationSyncOptions {
 export interface PresentationSyncBridge {
   readonly senderId: string;
   send: (payload: SyncMessagePayload, options?: { skipStorageFallback?: boolean }) => void;
-  close: () => void;
+  close: (options?: { endPresentation?: boolean }) => void;
 }
 
 export function buildAudienceWindowUrl(
@@ -119,7 +120,7 @@ export function createPresentationSyncBridge(
     if (!onPeersChange) return;
     const now = Date.now();
     for (const [id, info] of peers.entries()) {
-      if (now - info.lastSeen > 12000) {
+      if (now - info.lastSeen > 5500) {
         peers.delete(id);
       }
     }
@@ -191,7 +192,7 @@ export function createPresentationSyncBridge(
     } else if (p.type === 'pong') {
       peers.set(env.senderId, { role: p.role, lastSeen: Date.now() });
       emitPeerCounts();
-    } else if (p.type === 'goodbye') {
+    } else if (p.type === 'goodbye' || p.type === 'presentation-ended') {
       peers.delete(env.senderId);
       emitPeerCounts();
     } else {
@@ -220,38 +221,65 @@ export function createPresentationSyncBridge(
   };
   window.addEventListener('storage', onStorage);
 
-  const onPageHide = () => {
+  const onVisibilityChange = () => {
+    if (closed || document.visibilityState !== 'visible') return;
+    send({ type: 'ping', role }, { skipStorageFallback: Boolean(bc) });
+    emitPeerCounts();
+  };
+  document.addEventListener('visibilitychange', onVisibilityChange);
+
+  let heartbeatId: number | null = null;
+
+  const close = (closeOpts?: { endPresentation?: boolean }) => {
+    if (closed) return;
+    if (closeOpts?.endPresentation && role === 'presenter') {
+      send({ type: 'presentation-ended', role });
+    }
     send({ type: 'goodbye', role });
+    // Immediately purge transient storage relay key so no stale sync state lingers after close
+    try {
+      window.localStorage.removeItem(storageKey);
+    } catch {
+      // Ignore storage errors
+    }
+    closed = true;
+    if (heartbeatId !== null) {
+      window.clearInterval(heartbeatId);
+      heartbeatId = null;
+    }
+    peers.clear();
+    seenSeqBySender.clear();
+    window.removeEventListener('storage', onStorage);
+    document.removeEventListener('visibilitychange', onVisibilityChange);
+    window.removeEventListener('pagehide', onPageHide);
+    window.removeEventListener('beforeunload', onPageHide);
+    if (bc) {
+      try {
+        bc.onmessage = null;
+        bc.close();
+      } catch {
+        // Ignore close error
+      }
+      bc = null;
+    }
+  };
+
+  const onPageHide = () => {
+    close({ endPresentation: role === 'presenter' });
   };
   window.addEventListener('pagehide', onPageHide);
   window.addEventListener('beforeunload', onPageHide);
 
-  // Announce presence and run lightweight heartbeat to accurately track peer disconnect
+  // Announce presence and run fast lightweight heartbeat to accurately detect closed tabs
   send({ type: 'hello', role });
-  const heartbeatId = window.setInterval(() => {
+  heartbeatId = window.setInterval(() => {
     send({ type: 'ping', role }, { skipStorageFallback: Boolean(bc) });
     emitPeerCounts();
-  }, 4000);
+  }, 2000);
 
   return {
     senderId,
     send,
-    close: () => {
-      if (closed) return;
-      send({ type: 'goodbye', role });
-      closed = true;
-      window.clearInterval(heartbeatId);
-      window.removeEventListener('storage', onStorage);
-      window.removeEventListener('pagehide', onPageHide);
-      window.removeEventListener('beforeunload', onPageHide);
-      if (bc) {
-        try {
-          bc.close();
-        } catch {
-          // Ignore close error
-        }
-        bc = null;
-      }
-    },
+    close,
   };
 }

@@ -77,6 +77,7 @@ interface StudioWorkspaceProps {
   onMoveSlide: (index: number, direction: -1 | 1) => void;
   onOpenImportModal: (mode: 'import' | 'prompt') => void;
   onExportStandaloneHtml: () => void;
+  isSuspended?: boolean;
 }
 
 type InspectorTab = 'design' | 'html' | 'css' | 'notes' | 'settings';
@@ -111,6 +112,7 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
   onMoveSlide,
   onOpenImportModal,
   onExportStandaloneHtml,
+  isSuspended = false,
 }) => {
   const [leftRailOpen, setLeftRailOpen] = useState(true);
   const [rightInspectorOpen, setRightInspectorOpen] = useState(true);
@@ -1177,25 +1179,27 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
                     : 'bg-slate-200/45 dark:bg-slate-950'
                 }`}
               >
-                <SlideFrame
-                  ref={stageFrameRef}
-                  slide={activeSlide}
-                  theme={activeTheme}
-                  libraries={deck.libraries}
-                  customResources={deck.customResources}
-                  sharedCss={deck.sharedCss}
-                  aspectRatio={deck.aspectRatio}
-                  editMode={editMode}
-                  zoom={canvasZoom}
-                  onScaleChange={setEffectiveScale}
-                  onDimensionsChange={setResolvedSlideDims}
-                  onForwardKey={handleStageKeyForward}
-                  onVisualHtmlChange={handleVisualHtmlChange}
-                  onElementSelect={handleElementSelect}
-                  onLayersChange={handleLayersChange}
-                  onEditorUndo={handleUndo}
-                  onEditorRedo={handleRedo}
-                />
+                {!isSuspended && (
+                  <SlideFrame
+                    ref={stageFrameRef}
+                    slide={activeSlide}
+                    theme={activeTheme}
+                    libraries={deck.libraries}
+                    customResources={deck.customResources}
+                    sharedCss={deck.sharedCss}
+                    aspectRatio={deck.aspectRatio}
+                    editMode={editMode}
+                    zoom={canvasZoom}
+                    onScaleChange={setEffectiveScale}
+                    onDimensionsChange={setResolvedSlideDims}
+                    onForwardKey={handleStageKeyForward}
+                    onVisualHtmlChange={handleVisualHtmlChange}
+                    onElementSelect={handleElementSelect}
+                    onLayersChange={handleLayersChange}
+                    onEditorUndo={handleUndo}
+                    onEditorRedo={handleRedo}
+                  />
+                )}
               </div>
             </div>
           </div>

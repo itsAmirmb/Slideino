@@ -137,29 +137,122 @@ ${
 `;
 }
 
-function buildLibraryHeadTags(
+const TAILWIND_CLASS_PATTERN =
+  /(?:^|[\s"'`])(?:(?:sm|md|lg|xl|2xl|hover|focus|active|dark|group-hover):)?(?:flex|inline-flex|grid|inline-grid|block|inline-block|hidden|relative|absolute|fixed|sticky|static|inset-[a-z0-9[\]-]+|top-\d|right-\d|bottom-\d|left-\d|items-[a-z]+|justify-[a-z]+|content-[a-z]+|self-[a-z]+|place-[a-z-]+|flex-(?:row|col|wrap|nowrap|1|auto|initial|none|grow|shrink)|grow|shrink|shrink-0|gap-[xy0-9[\].-]+|space-[xy]-[0-9[\].-]+|p[trblxy]?-(?:\d|px|auto|\[)|m[trblxy]?-(?:\d|px|auto|\[)|-m[trblxy]?-\d|w-(?:\d|full|screen|auto|fit|min|max|px|1\/|2\/|3\/|4\/|5\/|\[)|h-(?:\d|full|screen|auto|fit|min|max|px|1\/|2\/|3\/|\[)|min-[wh]-[a-z0-9[\]/]+|max-[wh]-[a-z0-9[\]/]+|aspect-[a-z0-9[\]/]+|text-(?:xs|sm|base|lg|xl|\dxl|left|center|right|justify|balance|pretty|wrap|nowrap|truncate|white|black|transparent|current|slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|\[)|bg-(?:white|black|transparent|current|slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|gradient|none|cover|contain|center|\[)|from-[a-z0-9[\]-]+|via-[a-z0-9[\]-]+|to-[a-z0-9[\]-]+|border(?:-[trblxy0-9]|-solid|-dashed|-dotted|-none|-white|-black|-transparent|-slate|-gray|-zinc|-neutral|-stone|-red|-orange|-amber|-yellow|-green|-emerald|-teal|-cyan|-sky|-blue|-indigo|-violet|-purple|-pink|-rose|-\[)?|divide-[a-z0-9-]+|rounded(?:-[a-z0-9[\]-]+)?|shadow(?:-[a-z0-9[\]-]+)?|ring(?:-[a-z0-9[\]-]+)?|font-(?:thin|extralight|light|normal|medium|semibold|bold|extrabold|black|sans|serif|mono|\[)|leading-[a-z0-9[\]-]+|tracking-[a-z0-9[\]-]+|uppercase|lowercase|capitalize|italic|underline|line-through|truncate|antialiased|tabular-nums|opacity-\d+|z-(?:\d+|auto|\[)|col-span-|row-span-|grid-cols-|grid-rows-|overflow-[a-z-]+|backdrop-[a-z0-9-]+|transition(?:-[a-z]+)?|duration-\d+|ease-[a-z]+|scale-\d+|rotate-\d+|translate-[xy]-|object-(?:cover|contain|fill|center)|pointer-events-|select-(?:none|text|all|auto)|cursor-[a-z-]+|sr-only)(?=$|[\s"'`])/;
+
+function extractClassAttributeText(html: string): string {
+  const parts: string[] = [];
+  const regex = /\bclass\s*=\s*(?:"([^"]*)"|'([^']*)')/gi;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(html)) !== null) {
+    const val = match[1] ?? match[2] ?? '';
+    if (val) parts.push(val);
+  }
+  return parts.join(' ');
+}
+
+function detectUsedLibraries(
   libraries: LibraryConfig,
+  rawHtml: string,
+  slideCss: string,
+  isThumbnail: boolean,
+  isStandalone: boolean
+): LibraryConfig {
+  const html = rawHtml || '';
+  const classText = extractClassAttributeText(html);
+
+  const usesTailwind =
+    libraries.tailwind &&
+    !isStandalone &&
+    !/<script[^>]+tailwindcss/i.test(html) &&
+    (/\btailwind\.config\b/i.test(html) ||
+      (classText.length > 0 && TAILWIND_CLASS_PATTERN.test(classText)));
+
+  const usesKatex =
+    libraries.katex &&
+    !isStandalone &&
+    (/\$\$|\$[^$\n]+\$|\\\(|\\\[|\bkatex\s*\./i.test(html) ||
+      /\bkatex\b/i.test(classText) ||
+      /\bkatex\b/i.test(slideCss));
+
+  const usesHighlight =
+    libraries.highlightjs &&
+    !isStandalone &&
+    (/<pre\b|<code\b/i.test(html) || /\bhljs\b/i.test(classText));
+
+  const usesMermaid =
+    libraries.mermaid &&
+    !isStandalone &&
+    (/\bmermaid\b/i.test(classText) || /\bmermaid\s*\./i.test(html));
+
+  const usesChartjs =
+    libraries.chartjs &&
+    !isStandalone &&
+    (/<canvas\b/i.test(html) || /\bnew\s+Chart\s*\(|\bChart\s*\.\s*(?:register|defaults|getChart)\b/.test(html));
+
+  const usesLucide =
+    libraries.lucide &&
+    (/data-lucide\s*=/i.test(html) || /\blucide\s*\.\s*createIcons\b/.test(html)) &&
+    (!isStandalone || !/<script[^>]+lucide/i.test(html));
+
+  const usesGsap =
+    libraries.gsap &&
+    /\bgsap\s*\.|\bScrollTrigger\b/.test(html) &&
+    (!isStandalone || !/<script[^>]+gsap/i.test(html));
+
+  const usesFontAwesome =
+    libraries.fontawesome &&
+    !isStandalone &&
+    classText.length > 0 &&
+    /\bfa[srbldk]?\s+fa-|\bfa-[a-z0-9-]+/i.test(classText);
+
+  const usesAnimateCss =
+    libraries.animatecss &&
+    !isThumbnail &&
+    !isStandalone &&
+    classText.length > 0 &&
+    /\banimate__/i.test(classText);
+
+  const usesD3 =
+    libraries.d3 &&
+    !isStandalone &&
+    /\bd3\s*\./.test(html);
+
+  const usesReveal =
+    libraries.revealjs &&
+    classText.length > 0 &&
+    /\b(?:reveal|reveal-slide|r-hstack|r-vstack|r-stack|r-stretch|r-frame|r-fit-text|fragment)\b/i.test(classText);
+
+  return {
+    tailwind: usesTailwind,
+    katex: usesKatex,
+    highlightjs: usesHighlight,
+    mermaid: usesMermaid,
+    chartjs: usesChartjs,
+    lucide: usesLucide,
+    gsap: usesGsap,
+    revealjs: usesReveal,
+    fontawesome: usesFontAwesome,
+    animatecss: usesAnimateCss,
+    d3: usesD3,
+  };
+}
+
+function buildLibraryHeadTags(
+  used: LibraryConfig,
   theme: SlideTheme,
   customResources: CustomResource[],
   isThumbnail: boolean,
-  isStandalone: boolean,
-  rawHtml = ''
+  isStandalone: boolean
 ): string {
   const tags: string[] = [];
 
   if (!isStandalone) {
-    // Google Fonts for built-in typography families
-    tags.push(
-      `<link rel="preconnect" href="https://fonts.googleapis.com">`,
-      `<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>`,
-      `<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=JetBrains+Mono:wght@400;500;600&family=Playfair+Display:wght@500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap">`
-    );
-
-    if (libraries.tailwind) {
+    if (used.tailwind) {
       tags.push(`<script src="https://cdn.tailwindcss.com"></script>`);
     }
 
-    if (libraries.katex) {
+    if (used.katex) {
       tags.push(
         `<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">`,
         `<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>`,
@@ -167,7 +260,7 @@ function buildLibraryHeadTags(
       );
     }
 
-    if (libraries.highlightjs) {
+    if (used.highlightjs) {
       const hlTheme = theme.isDark ? 'github-dark' : 'github';
       tags.push(
         `<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.10.0/styles/${hlTheme}.min.css">`,
@@ -175,63 +268,55 @@ function buildLibraryHeadTags(
       );
     }
 
-    if (libraries.mermaid) {
+    if (used.mermaid) {
       tags.push(
         `<script defer src="https://cdn.jsdelivr.net/npm/mermaid@11.4.0/dist/mermaid.min.js"></script>`
       );
     }
 
-    if (libraries.chartjs) {
+    if (used.chartjs) {
       tags.push(
         `<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>`
       );
     }
 
-    if (libraries.lucide) {
+    if (used.lucide) {
       tags.push(
         `<script defer src="https://cdn.jsdelivr.net/npm/lucide@0.460.0/dist/umd/lucide.min.js"></script>`
       );
     }
 
-    if (libraries.gsap) {
+    if (used.gsap) {
       tags.push(
         `<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>`
       );
     }
 
-    if (libraries.fontawesome) {
+    if (used.fontawesome) {
       tags.push(
         `<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css">`
       );
     }
 
-    if (libraries.animatecss && !isThumbnail) {
+    if (used.animatecss && !isThumbnail) {
       tags.push(
         `<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css">`
       );
     }
 
-    if (libraries.d3) {
+    if (used.d3) {
       tags.push(
         `<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>`
       );
     }
   } else {
     // Smart fallback for standalone HTML documents that reference Lucide or GSAP without bundling CDN tags
-    if (
-      libraries.lucide &&
-      /data-lucide\s*=/i.test(rawHtml) &&
-      !/<script[^>]+lucide/i.test(rawHtml)
-    ) {
+    if (used.lucide) {
       tags.push(
         `<script defer src="https://cdn.jsdelivr.net/npm/lucide@0.460.0/dist/umd/lucide.min.js"></script>`
       );
     }
-    if (
-      libraries.gsap &&
-      /\bgsap\s*\./i.test(rawHtml) &&
-      !/<script[^>]+gsap/i.test(rawHtml)
-    ) {
+    if (used.gsap) {
       tags.push(
         `<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>`
       );
@@ -691,17 +776,32 @@ export function buildSlideDocument(options: BuildSlideOptions): string {
   const isStandalone = Boolean(slide.standalone) || isFullDocument;
   const activeEditMode = Boolean(editMode && !isThumbnail);
 
-  const autoFontLink = buildAutoGoogleFontsLink(processedHtml, slide.css || '', sharedCss);
+  const themeFontSources = isStandalone
+    ? undefined
+    : `${theme.tokens.fontDisplay}\n${theme.tokens.fontBody}\n${theme.tokens.fontMono}`;
+  const autoFontLink = buildAutoGoogleFontsLink(
+    processedHtml,
+    slide.css || '',
+    sharedCss,
+    themeFontSources
+  );
+
+  const usedLibraries = detectUsedLibraries(
+    libraries,
+    processedHtml,
+    slide.css || '',
+    isThumbnail,
+    isStandalone
+  );
 
   const headTags = buildLibraryHeadTags(
-    libraries,
+    usedLibraries,
     theme,
     customResources,
     isThumbnail,
-    isStandalone,
-    processedHtml
+    isStandalone
   );
-  const revealCompatTag = libraries.revealjs
+  const revealCompatTag = usedLibraries.revealjs
     ? `<style data-slideino-reveal="true">${buildRevealCompatCss(
         isThumbnail,
         activeEditMode,
@@ -714,7 +814,7 @@ export function buildSlideDocument(options: BuildSlideOptions): string {
   const runtimeScript = buildRuntimeBootstrapScript(
     instanceId,
     theme,
-    libraries,
+    usedLibraries,
     isThumbnail,
     activeEditMode,
     autoSize,

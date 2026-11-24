@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   CustomResource,
   Deck,
@@ -12,10 +12,7 @@ import {
 import { DEFAULT_LIBRARIES } from './data/libraries';
 import { SLIDE_TEMPLATES } from './data/starterDeck';
 import { mergeSharedCss } from './utils/htmlImporter';
-import {
-  exportStandalonePresentationHtml,
-  PresentationExportOptions,
-} from './utils/presentationExporter';
+import { PresentationExportOptions } from './utils/presentationExporter';
 import { detectSlideStaticDimensions } from './utils/slideRuntime';
 import {
   getAllThemes,
@@ -31,13 +28,26 @@ import {
 } from './utils/storage';
 import { Header } from './components/Header';
 import { StudioWorkspace } from './components/StudioWorkspace';
-import { ThemeStudio } from './components/ThemeStudio';
-import { LibraryManager } from './components/LibraryManager';
-import { DeckManager } from './components/DeckManager';
-import { ImportModal } from './components/ImportModal';
-import { ExportPresentationModal } from './components/ExportPresentationModal';
 import { PresentationMode } from './components/PresentationMode';
 import { parseAudienceUrlParams } from './utils/presentationSync';
+
+const ThemeStudio = lazy(() =>
+  import('./components/ThemeStudio').then((m) => ({ default: m.ThemeStudio }))
+);
+const LibraryManager = lazy(() =>
+  import('./components/LibraryManager').then((m) => ({ default: m.LibraryManager }))
+);
+const DeckManager = lazy(() =>
+  import('./components/DeckManager').then((m) => ({ default: m.DeckManager }))
+);
+const ImportModal = lazy(() =>
+  import('./components/ImportModal').then((m) => ({ default: m.ImportModal }))
+);
+const ExportPresentationModal = lazy(() =>
+  import('./components/ExportPresentationModal').then((m) => ({
+    default: m.ExportPresentationModal,
+  }))
+);
 
 function formatByteSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -48,18 +58,19 @@ function formatByteSize(bytes: number): string {
 export default function App() {
   const audienceParams = useMemo(() => parseAudienceUrlParams(), []);
 
-  const [decks, setDecks] = useState<Deck[]>(() => loadDecks());
-  const [activeDeckId, setActiveDeckId] = useState<string>(() => {
+  const initialBoot = useMemo(() => {
     const initialDecks = loadDecks();
-    if (
+    const resolvedDeckId =
       audienceParams.isAudienceView &&
       audienceParams.deckId &&
       initialDecks.some((d) => d.id === audienceParams.deckId)
-    ) {
-      return audienceParams.deckId;
-    }
-    return loadActiveDeckId(initialDecks);
-  });
+        ? audienceParams.deckId
+        : loadActiveDeckId(initialDecks);
+    return { initialDecks, resolvedDeckId };
+  }, [audienceParams.deckId, audienceParams.isAudienceView]);
+
+  const [decks, setDecks] = useState<Deck[]>(() => initialBoot.initialDecks);
+  const [activeDeckId, setActiveDeckId] = useState<string>(() => initialBoot.resolvedDeckId);
   const [customThemes, setCustomThemes] = useState<SlideTheme[]>(() => loadCustomThemes());
   const [uiDarkMode, setUiDarkMode] = useState<boolean>(() => loadUiDarkMode());
 
@@ -316,6 +327,7 @@ export default function App() {
     async (targetDeck: Deck, options: PresentationExportOptions) => {
       const themeForDeck =
         allThemes.find((t) => t.id === targetDeck.themeId) || allThemes[0];
+      const { exportStandalonePresentationHtml } = await import('./utils/presentationExporter');
       const { html, slideCount, byteSize } = await exportStandalonePresentationHtml(
         targetDeck,
         themeForDeck,
@@ -538,6 +550,22 @@ export default function App() {
     [updateActiveDeck]
   );
 
+  // Dedicated Audience Window renders ONLY the clean full-screen presentation stage (zero Studio iframes/overhead)
+  if (audienceParams.isAudienceView) {
+    return (
+      <PresentationMode
+        deck={activeDeck}
+        theme={activeTheme}
+        initialSlideIndex={activeSlideIndex}
+        viewRole="audience"
+        syncSessionId={audienceParams.syncId || `deck-${activeDeck.id}`}
+        onExit={() => {
+          // Audience window stays clean on stage; pressing Escape only exits fullscreen/overlays
+        }}
+      />
+    );
+  }
+
   return (
     <div className="h-screen w-screen overflow-hidden flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
       {/* Skip to Main Content Link for Keyboard & Screen Reader Accessibility */}
@@ -562,6 +590,7 @@ export default function App() {
             activeTheme={activeTheme}
             activeSlideIndex={activeSlideIndex}
             uiDarkMode={uiDarkMode}
+            isSuspended={presenting}
             onToggleUiDarkMode={() => setUiDarkMode((v) => !v)}
             onSelectSlide={setActiveSlideIndex}
             onUpdateDeck={updateActiveDeck}
@@ -575,101 +604,102 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'themes' && (
-          <ThemeStudio
-            deck={activeDeck}
-            themes={allThemes}
-            activeSlideIndex={activeSlideIndex}
-            onSelectDeckTheme={(themeId) =>
-              updateActiveDeck((d) => ({
-                ...d,
-                themeId,
-                updatedAt: new Date().toISOString(),
-              }))
-            }
-            onSaveCustomTheme={handleSaveCustomTheme}
-            onDeleteCustomTheme={handleDeleteCustomTheme}
-          />
-        )}
+        <Suspense
+          fallback={
+            <div className="flex-1 flex items-center justify-center text-xs text-slate-400">
+              Loading workspace…
+            </div>
+          }
+        >
+          {activeTab === 'themes' && (
+            <ThemeStudio
+              deck={activeDeck}
+              themes={allThemes}
+              activeSlideIndex={activeSlideIndex}
+              onSelectDeckTheme={(themeId) =>
+                updateActiveDeck((d) => ({
+                  ...d,
+                  themeId,
+                  updatedAt: new Date().toISOString(),
+                }))
+              }
+              onSaveCustomTheme={handleSaveCustomTheme}
+              onDeleteCustomTheme={handleDeleteCustomTheme}
+            />
+          )}
 
-        {activeTab === 'libraries' && (
-          <LibraryManager
-            deck={activeDeck}
-            onToggleLibrary={handleToggleLibrary}
-            onInsertLibraryExample={handleInsertLibraryExample}
-            onAddCustomResource={handleAddCustomResource}
-            onRemoveCustomResource={handleRemoveCustomResource}
-          />
-        )}
+          {activeTab === 'libraries' && (
+            <LibraryManager
+              deck={activeDeck}
+              onToggleLibrary={handleToggleLibrary}
+              onInsertLibraryExample={handleInsertLibraryExample}
+              onAddCustomResource={handleAddCustomResource}
+              onRemoveCustomResource={handleRemoveCustomResource}
+            />
+          )}
 
-        {activeTab === 'decks' && (
-          <DeckManager
-            decks={decks}
-            activeDeck={activeDeck}
-            themes={allThemes}
-            onSelectDeck={(id) => {
-              setActiveDeckId(id);
-              setActiveSlideIndex(0);
-              setActiveTab('studio');
-            }}
-            onCreateDeck={handleCreateDeck}
-            onDuplicateDeck={handleDuplicateDeck}
-            onDeleteDeck={handleDeleteDeck}
-            onImportDeckJson={handleImportDeckJson}
-            onExportStandaloneHtml={handleOpenExportModal}
-            onSaveSnapshot={handleSaveSnapshot}
-            onRestoreSnapshot={handleRestoreSnapshot}
-            onDeleteSnapshot={handleDeleteSnapshot}
-          />
-        )}
+          {activeTab === 'decks' && (
+            <DeckManager
+              decks={decks}
+              activeDeck={activeDeck}
+              themes={allThemes}
+              onSelectDeck={(id) => {
+                setActiveDeckId(id);
+                setActiveSlideIndex(0);
+                setActiveTab('studio');
+              }}
+              onCreateDeck={handleCreateDeck}
+              onDuplicateDeck={handleDuplicateDeck}
+              onDeleteDeck={handleDeleteDeck}
+              onImportDeckJson={handleImportDeckJson}
+              onExportStandaloneHtml={handleOpenExportModal}
+              onSaveSnapshot={handleSaveSnapshot}
+              onRestoreSnapshot={handleRestoreSnapshot}
+              onDeleteSnapshot={handleDeleteSnapshot}
+            />
+          )}
+        </Suspense>
       </main>
 
-      <ImportModal
-        isOpen={importModalState.open}
-        initialMode={importModalState.mode}
-        deck={activeDeck}
-        theme={activeTheme}
-        onClose={() => setImportModalState((s) => ({ ...s, open: false }))}
-        onImportSlides={handleImportSlides}
-      />
+      <Suspense fallback={null}>
+        {importModalState.open && (
+          <ImportModal
+            isOpen={importModalState.open}
+            initialMode={importModalState.mode}
+            deck={activeDeck}
+            theme={activeTheme}
+            onClose={() => setImportModalState((s) => ({ ...s, open: false }))}
+            onImportSlides={handleImportSlides}
+          />
+        )}
 
-      <ExportPresentationModal
-        isOpen={Boolean(exportModalDeck)}
-        deck={exportModalDeck}
-        theme={
-          (exportModalDeck && allThemes.find((t) => t.id === exportModalDeck.themeId)) ||
-          activeTheme
-        }
-        onClose={() => setExportModalDeck(null)}
-        onExport={handleConfirmExportPresentation}
-      />
+        {exportModalDeck && (
+          <ExportPresentationModal
+            isOpen={Boolean(exportModalDeck)}
+            deck={exportModalDeck}
+            theme={
+              (exportModalDeck && allThemes.find((t) => t.id === exportModalDeck.themeId)) ||
+              activeTheme
+            }
+            onClose={() => setExportModalDeck(null)}
+            onExport={handleConfirmExportPresentation}
+          />
+        )}
+      </Suspense>
 
-      {audienceParams.isAudienceView ? (
+      {presenting && (
         <PresentationMode
           deck={activeDeck}
           theme={activeTheme}
           initialSlideIndex={activeSlideIndex}
-          viewRole="audience"
-          syncSessionId={audienceParams.syncId || `deck-${activeDeck.id}`}
-          onExit={() => {
-            // Audience window stays clean on stage; pressing Escape only exits fullscreen/overlays
+          viewRole="presenter"
+          syncSessionId={`deck-${activeDeck.id}`}
+          onExportPresentation={() => handleOpenExportModal(activeDeck)}
+          onExit={(lastIndex) => {
+            setPresenting(false);
+            setActiveSlideIndex(lastIndex);
           }}
         />
-      ) : (
-        presenting && (
-          <PresentationMode
-            deck={activeDeck}
-            theme={activeTheme}
-            initialSlideIndex={activeSlideIndex}
-            viewRole="presenter"
-            syncSessionId={`deck-${activeDeck.id}`}
-            onExportPresentation={() => handleOpenExportModal(activeDeck)}
-            onExit={(lastIndex) => {
-              setPresenting(false);
-              setActiveSlideIndex(lastIndex);
-            }}
-          />
-        )
       )}
 
       {/* Accessible Toast Notification */}
