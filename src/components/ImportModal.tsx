@@ -52,6 +52,8 @@ function formatSourceLabel(format?: ParsedImportResult['sourceFormat']): string 
   switch (format) {
     case 'singlefile-iframes':
       return 'SingleFile embedded slide frames';
+    case 'revealjs':
+      return 'Reveal.js presentation slides';
     case 'comment-delimited':
       return 'Comment-delimited slides';
     case 'sections':

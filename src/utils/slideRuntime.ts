@@ -104,12 +104,46 @@ function resolveLocalAssetPaths(html: string, origin: string): string {
   );
 }
 
+function buildRevealCompatCss(isThumbnail: boolean, editMode: boolean, prefersReducedMotion: boolean): string {
+  const instant = isThumbnail || editMode || prefersReducedMotion;
+  return `
+/* Reveal.js Layout & Utility Compatibility Layer (zero-specificity base) */
+:where(.reveal, .reveal .slides) { width: 100%; height: 100%; position: relative; }
+:where(section.reveal-slide, .reveal .slides > section) {
+  width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center;
+}
+.r-hstack { display: flex; flex-direction: row; align-items: center; justify-content: center; }
+.r-vstack { display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.r-stack { display: grid; }
+.r-stack > * { grid-area: 1 / 1; margin: auto; }
+.r-stretch { flex: 1 1 auto; min-height: 0; max-width: 100%; object-fit: contain; }
+.r-frame { border: 4px solid var(--slide-border); box-shadow: 0 12px 32px rgba(0,0,0,0.16); border-radius: var(--slide-radius); }
+.r-fit-text { display: inline-block; white-space: nowrap; max-width: 100%; }
+aside.notes { display: none !important; }
+${
+  instant
+    ? `.fragment { opacity: 1 !important; visibility: visible !important; transform: none !important; }`
+    : `.fragment { opacity: 0; transition: opacity 420ms cubic-bezier(0.16, 1, 0.3, 1), transform 420ms cubic-bezier(0.16, 1, 0.3, 1); }
+.fragment.fade-up { transform: translateY(18px); }
+.fragment.fade-down { transform: translateY(-18px); }
+.fragment.fade-left { transform: translateX(20px); }
+.fragment.fade-right { transform: translateX(-20px); }
+.fragment.zoom-in { transform: scale(0.94); }
+.fragment.visible { opacity: 1; transform: none; }
+.fragment.visible.highlight-red { color: #ef4444; }
+.fragment.visible.highlight-blue { color: #3b82f6; }
+.fragment.visible.highlight-green { color: #22c55e; }`
+}
+`;
+}
+
 function buildLibraryHeadTags(
   libraries: LibraryConfig,
   theme: SlideTheme,
   customResources: CustomResource[],
   isThumbnail: boolean,
-  isStandalone: boolean
+  isStandalone: boolean,
+  rawHtml = ''
 ): string {
   const tags: string[] = [];
 
@@ -159,6 +193,12 @@ function buildLibraryHeadTags(
       );
     }
 
+    if (libraries.gsap) {
+      tags.push(
+        `<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>`
+      );
+    }
+
     if (libraries.fontawesome) {
       tags.push(
         `<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css">`
@@ -174,6 +214,26 @@ function buildLibraryHeadTags(
     if (libraries.d3) {
       tags.push(
         `<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>`
+      );
+    }
+  } else {
+    // Smart fallback for standalone HTML documents that reference Lucide or GSAP without bundling CDN tags
+    if (
+      libraries.lucide &&
+      /data-lucide\s*=/i.test(rawHtml) &&
+      !/<script[^>]+lucide/i.test(rawHtml)
+    ) {
+      tags.push(
+        `<script defer src="https://cdn.jsdelivr.net/npm/lucide@0.460.0/dist/umd/lucide.min.js"></script>`
+      );
+    }
+    if (
+      libraries.gsap &&
+      /\bgsap\s*\./i.test(rawHtml) &&
+      !/<script[^>]+gsap/i.test(rawHtml)
+    ) {
+      tags.push(
+        `<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>`
       );
     }
   }
@@ -333,7 +393,7 @@ function buildRuntimeBootstrapScript(
       if (tag === 'input' || tag === 'textarea' || tag === 'select' || (e.target && e.target.isContentEditable)) {
         return;
       }
-      var forwardKeys = ['ArrowRight', 'ArrowLeft', 'ArrowUp', 'ArrowDown', ' ', 'PageDown', 'PageUp', 'Home', 'End', 'Escape', 'f', 'F', 'g', 'G', 'n', 'N', 'b', 'B', 'l', 'L', 'p', 'P', 'h', 'H', 'a', 'A', 'r', 'R', 'e', 'E', 'c', 'C', 'v', 'V', '?'];
+      var forwardKeys = ['ArrowRight', 'ArrowLeft', 'ArrowUp', 'ArrowDown', ' ', 'PageDown', 'PageUp', 'Home', 'End', 'Escape', 'f', 'F', 'g', 'G', 'n', 'N', 'b', 'B', 'l', 'L', 'p', 'P', 'h', 'H', 'a', 'A', 'r', 'R', 'e', 'E', 'c', 'C', 'v', 'V', 't', 'T', 'o', 'O', '?'];
       if (forwardKeys.indexOf(e.key) !== -1) {
         postHost('keydown', { key: e.key, shiftKey: !!e.shiftKey });
       }
@@ -390,6 +450,55 @@ function buildRuntimeBootstrapScript(
           fontFamily: getComputedStyle(document.documentElement).getPropertyValue('--slide-font-body').trim() || 'sans-serif'
         });
         window.mermaid.run({ querySelector: '.mermaid' }).catch(function() {});
+      }
+    } catch (_) {}`
+        : ''
+    }
+
+    // 5. Reveal.js compatibility (.r-fit-text scaling + staggered .fragment reveal)
+    ${
+      libraries.revealjs
+        ? `try {
+      var fitNodes = document.querySelectorAll('.r-fit-text');
+      fitNodes.forEach(function(el) {
+        if (el.dataset.slFitSized) return;
+        var parent = el.parentElement;
+        if (!parent) return;
+        var maxW = Math.max(240, parent.clientWidth - 8);
+        el.style.fontSize = '64px';
+        var actualW = el.scrollWidth || el.getBoundingClientRect().width || 1;
+        var nextSize = Math.max(24, Math.min(112, Math.floor(64 * (maxW / actualW) * 0.96)));
+        el.style.fontSize = nextSize + 'px';
+        el.dataset.slFitSized = '1';
+      });
+      var fragments = document.querySelectorAll('.fragment:not(.visible)');
+      if (fragments.length > 0) {
+        var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        fragments.forEach(function(el, idx) {
+          if (IS_THUMBNAIL || EDIT_MODE || reduced) {
+            el.classList.add('visible');
+          } else {
+            setTimeout(function() { el.classList.add('visible'); }, 90 + idx * 120);
+          }
+        });
+      }
+    } catch (_) {}`
+        : ''
+    }
+
+    // 6. GSAP thumbnail & reduced-motion fast-forward so slides never freeze invisible
+    ${
+      libraries.gsap
+        ? `try {
+      var reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if ((IS_THUMBNAIL || reducedMotion) && window.gsap && window.gsap.globalTimeline) {
+        window.gsap.globalTimeline.timeScale(1000);
+        window.gsap.globalTimeline.progress(1);
+        setTimeout(function() {
+          if (window.gsap && window.gsap.globalTimeline) {
+            window.gsap.globalTimeline.progress(1);
+          }
+        }, 120);
       }
     } catch (_) {}`
         : ''
@@ -589,8 +698,16 @@ export function buildSlideDocument(options: BuildSlideOptions): string {
     theme,
     customResources,
     isThumbnail,
-    isStandalone
+    isStandalone,
+    processedHtml
   );
+  const revealCompatTag = libraries.revealjs
+    ? `<style data-slideino-reveal="true">${buildRevealCompatCss(
+        isThumbnail,
+        activeEditMode,
+        prefersReducedMotion
+      )}</style>`
+    : '';
   const sharedStyleTag = sharedCss?.trim()
     ? `<style data-slideino-shared="true">${escapeStyleClose(sharedCss)}</style>`
     : '';
@@ -614,6 +731,7 @@ export function buildSlideDocument(options: BuildSlideOptions): string {
         buildRootVariablesCss(theme, slide)
       )}</style>`,
       sharedStyleTag,
+      revealCompatTag,
     ]
       .filter(Boolean)
       .join('\n');
@@ -671,6 +789,7 @@ export function buildSlideDocument(options: BuildSlideOptions): string {
   ${sharedStyleTag}
   ${autoFontLink}
   ${headTags}
+  ${revealCompatTag}
   ${themeStyleTag}
 </head>
 <body>

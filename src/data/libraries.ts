@@ -2,11 +2,13 @@ import { LibraryConfig, LibraryDefinition } from '../types/slideino';
 
 export const DEFAULT_LIBRARIES: LibraryConfig = {
   tailwind: true,
+  revealjs: true,
   katex: true,
   mermaid: true,
   chartjs: true,
   highlightjs: true,
   lucide: true,
+  gsap: true,
   fontawesome: false,
   animatecss: true,
   d3: false,
@@ -49,6 +51,46 @@ export const LIBRARY_CATALOG: LibraryDefinition[] = [
 </div>`,
     exampleCss: '',
     exampleNotes: 'Demonstrates Tailwind CSS runtime classes working alongside Slideino theme variables.',
+  },
+  {
+    id: 'revealjs',
+    name: 'Reveal.js Compat',
+    version: '5.x Layout',
+    category: 'styling',
+    description:
+      'Supports Reveal.js decks and layout classes (.r-hstack, .r-vstack, .r-stack, .r-fit-text, .fragment) and auto-splits imported Reveal.js <section> slides with speaker notes.',
+    usageHint: '<section class="r-vstack"><h1 class="r-fit-text">...</h1><div class="fragment">',
+    exampleTitle: 'Reveal.js Layout & Fragments',
+    exampleHtml: `<section class="reveal-demo r-vstack">
+  <p class="kicker">Reveal.js Compatibility</p>
+  <h1 class="r-fit-text">Built for Reveal.js Decks</h1>
+  <div class="r-hstack cards">
+    <div class="card fragment fade-up">
+      <i data-lucide="layout-template" style="width:24px;height:24px;color:var(--slide-accent);"></i>
+      <h3>Layout Helpers</h3>
+      <p>Use <code>.r-hstack</code>, <code>.r-vstack</code>, <code>.r-stack</code>, and <code>.r-fit-text</code> out of the box.</p>
+    </div>
+    <div class="card fragment fade-up">
+      <i data-lucide="layers" style="width:24px;height:24px;color:var(--slide-accent);"></i>
+      <h3>Smart Deck Import</h3>
+      <p>Paste any Reveal.js HTML deck to split horizontal &amp; vertical <code>&lt;section&gt;</code> slides automatically.</p>
+    </div>
+    <div class="card fragment fade-up">
+      <i data-lucide="notebook-pen" style="width:24px;height:24px;color:var(--slide-accent);"></i>
+      <h3>Speaker Notes</h3>
+      <p>Any <code>&lt;aside class="notes"&gt;</code> tag is extracted straight into Presenter Notes.</p>
+    </div>
+  </div>
+</section>`,
+    exampleCss: `.reveal-demo { height: 100%; padding: var(--slide-padding); gap: 24px; align-items: stretch; justify-content: center; }
+.kicker { margin: 0; font-size: 14px; font-weight: 600; color: var(--slide-accent); }
+.reveal-demo h1 { margin: 0; font-family: var(--slide-font-display); font-weight: 700; line-height: 1.08; }
+.cards { gap: 20px; align-items: stretch; margin-top: 12px; }
+.card { flex: 1; padding: 26px; border-radius: var(--slide-radius); background: var(--slide-surface); border: 1px solid var(--slide-border); display: flex; flex-direction: column; gap: 12px; }
+.card h3 { margin: 0; font-size: 20px; font-weight: 600; }
+.card p { margin: 0; font-size: 15px; color: var(--slide-muted); line-height: 1.6; }
+.card code { font-family: var(--slide-font-mono); font-size: 13px; color: var(--slide-accent); }`,
+    exampleNotes: 'Reveal.js layout helpers, fragments, and <aside class="notes"> work seamlessly in Slideino.',
   },
   {
     id: 'mermaid',
@@ -250,6 +292,70 @@ h1 { margin: 0; font-family: var(--slide-font-display); font-size: 44px; }
 .cell h3 { margin: 0; font-size: 20px; font-weight: 600; }
 .cell p { margin: 0; font-size: 15px; color: var(--slide-muted); line-height: 1.6; }`,
     exampleNotes: 'Lucide automatically replaces data-lucide attributes with inline SVG icons.',
+  },
+  {
+    id: 'gsap',
+    name: 'GSAP',
+    version: '3.12',
+    category: 'icons-motion',
+    description:
+      'Industry-standard JavaScript animation engine for precision timelines, staggered card entrances, morphing counters, and smooth 60fps slide choreography.',
+    usageHint: "gsap.from('.card', { y: 24, opacity: 0, stagger: 0.1 })",
+    exampleTitle: 'GSAP Choreographed Motion',
+    exampleHtml: `<div class="gsap-slide">
+  <div class="gsap-head">
+    <p class="kicker">GSAP 3.12 Timeline</p>
+    <h1>Precision Motion Choreography</h1>
+    <p class="lead">Staggered timelines, spring eases, and animated counters run smoothly at 60fps—and auto-settle in thumbnails.</p>
+  </div>
+  <div class="gsap-grid">
+    <div class="gsap-card">
+      <i data-lucide="gauge" style="width:24px;height:24px;color:var(--slide-accent);"></i>
+      <span class="kpi" data-target="60" data-suffix=" fps">60 fps</span>
+      <span class="lbl">GPU-Accelerated Tweens</span>
+    </div>
+    <div class="gsap-card">
+      <i data-lucide="sparkles" style="width:24px;height:24px;color:var(--slide-accent);"></i>
+      <span class="kpi" data-target="120" data-suffix=" ms">120 ms</span>
+      <span class="lbl">Stagger Cadence</span>
+    </div>
+    <div class="gsap-card">
+      <i data-lucide="layers" style="width:24px;height:24px;color:var(--slide-accent);"></i>
+      <span class="kpi" data-target="100" data-suffix="%">100%</span>
+      <span class="lbl">Timeline Control</span>
+    </div>
+  </div>
+</div>
+<script>
+  window.addEventListener('DOMContentLoaded', () => {
+    if (typeof gsap === 'undefined') return;
+    const tl = gsap.timeline({ defaults: { ease: 'power3.out' } });
+    tl.from('.gsap-head > *', { y: 20, opacity: 0, duration: 0.55, stagger: 0.09 })
+      .from('.gsap-card', { y: 28, opacity: 0, scale: 0.96, duration: 0.6, stagger: 0.12 }, '-=0.25');
+    document.querySelectorAll('.kpi').forEach((el) => {
+      const target = Number(el.getAttribute('data-target') || 0);
+      const suffix = el.getAttribute('data-suffix') || '';
+      const obj = { val: 0 };
+      gsap.to(obj, {
+        val: target,
+        duration: 0.95,
+        delay: 0.25,
+        ease: 'power2.out',
+        onUpdate: () => { el.textContent = Math.round(obj.val) + suffix; }
+      });
+    });
+  });
+</script>`,
+    exampleCss: `.gsap-slide { height: 100%; padding: var(--slide-padding); display: flex; flex-direction: column; justify-content: center; gap: 36px; }
+.gsap-head { max-width: 820px; display: flex; flex-direction: column; gap: 12px; }
+.kicker { margin: 0; font-size: 14px; font-weight: 600; color: var(--slide-accent); }
+.gsap-head h1 { margin: 0; font-family: var(--slide-font-display); font-size: 48px; line-height: 1.1; }
+.lead { margin: 0; font-size: 18px; color: var(--slide-muted); line-height: 1.55; }
+.gsap-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
+.gsap-card { padding: 28px; border-radius: var(--slide-radius); background: var(--slide-surface); border: 1px solid var(--slide-border); display: flex; flex-direction: column; gap: 10px; }
+.kpi { font-family: var(--slide-font-mono); font-size: 40px; font-weight: 700; color: var(--slide-text); font-variant-numeric: tabular-nums; }
+.lbl { font-size: 14px; color: var(--slide-muted); }`,
+    exampleNotes: 'GSAP timelines animate entrances cleanly in Presentation Mode and automatically jump to their final state in thumbnails and reduced-motion mode.',
   },
   {
     id: 'fontawesome',

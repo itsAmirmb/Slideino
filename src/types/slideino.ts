@@ -8,11 +8,13 @@ export type DevicePreview = 'desktop' | 'tablet' | 'mobile';
 
 export type LibraryId =
   | 'tailwind'
+  | 'revealjs'
   | 'katex'
   | 'mermaid'
   | 'chartjs'
   | 'highlightjs'
   | 'lucide'
+  | 'gsap'
   | 'fontawesome'
   | 'animatecss'
   | 'd3';

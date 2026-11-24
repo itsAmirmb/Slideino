@@ -188,7 +188,7 @@ export const LibraryManager: React.FC<LibraryManagerProps> = ({
                 Custom External Scripts &amp; Stylesheets
               </h2>
               <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
-                Need Three.js, Plotly, GSAP, or a bespoke Google Font stylesheet? Attach any HTTPS CDN resource to this deck.
+                Need Three.js, Plotly, Lottie, or a bespoke Google Font stylesheet? Attach any HTTPS CDN resource to this deck.
               </p>
             </div>
             <div className="inline-flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">

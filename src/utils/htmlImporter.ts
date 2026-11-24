@@ -20,6 +20,7 @@ export interface ParsedImportResult {
   mode: 'multi-slide' | 'single-slide';
   sourceFormat?:
     | 'singlefile-iframes'
+    | 'revealjs'
     | 'comment-delimited'
     | 'sections'
     | 'slide-classes'
@@ -420,6 +421,80 @@ export function parseImportedHtml(rawInput: string): ParsedImportResult {
       .trim();
     const cleanedStyleBlocks = extractFontFacesFromCss(rawStyleBlocks, fontPool).trim();
 
+    // 1b. Check for Reveal.js presentation decks (.reveal > .slides > section, supporting vertical stacks & <aside class="notes">)
+    const revealSlidesRoot = doc.querySelector('.reveal .slides, .reveal > .slides');
+    if (revealSlidesRoot) {
+      const topSections = Array.from(revealSlidesRoot.children).filter(
+        (el) => el.tagName.toLowerCase() === 'section'
+      );
+      const flattenedSections: Element[] = [];
+      for (const sec of topSections) {
+        const nestedSections = Array.from(sec.children).filter(
+          (el) => el.tagName.toLowerCase() === 'section'
+        );
+        if (nestedSections.length > 0) {
+          flattenedSections.push(...nestedSections);
+        } else {
+          flattenedSections.push(sec);
+        }
+      }
+
+      if (flattenedSections.length > 0) {
+        const { sharedCss, uniqueCount, savedBytes } = finalizeFontFacePool(fontPool);
+        const revealSlides: Slide[] = flattenedSections.map((sec, idx) => {
+          const clone = sec.cloneNode(true) as HTMLElement;
+          const noteEls = Array.from(clone.querySelectorAll('aside.notes'));
+          const notes = noteEls
+            .map((el) => el.textContent?.trim() || '')
+            .filter(Boolean)
+            .join('\n\n');
+          noteEls.forEach((el) => el.remove());
+
+          const bgAttr =
+            clone.getAttribute('data-background-color') ||
+            clone.getAttribute('data-background-gradient') ||
+            clone.getAttribute('data-background') ||
+            '';
+          const backgroundOverride =
+            bgAttr && !/^https?:|^data:|\.(png|jpe?g|webp|gif|svg)$/i.test(bgAttr.trim())
+              ? bgAttr.trim()
+              : undefined;
+
+          const trRaw = (clone.getAttribute('data-transition') || '').toLowerCase().trim();
+          const transition: Slide['transition'] =
+            trRaw === 'none'
+              ? 'none'
+              : trRaw === 'zoom'
+              ? 'zoom'
+              : trRaw === 'slide' || trRaw === 'convex' || trRaw === 'concave'
+              ? 'slide'
+              : 'fade';
+
+          clone.classList.add('reveal-slide');
+          const html = clone.outerHTML;
+          return {
+            id: makeSlideId(idx),
+            title: extractHeadingTitle(html, idx),
+            html,
+            css: cleanedStyleBlocks,
+            notes,
+            transition,
+            backgroundOverride,
+          };
+        });
+
+        return {
+          detectedTitle,
+          sharedCss: sharedCss || undefined,
+          deduplicatedFontCount: uniqueCount || undefined,
+          savedBytes: savedBytes || undefined,
+          mode: revealSlides.length > 1 ? 'multi-slide' : 'single-slide',
+          sourceFormat: 'revealjs',
+          slides: revealSlides,
+        };
+      }
+    }
+
     // 2. Look for top-level <section> elements or .slide elements
     const sectionNodes = Array.from(doc.body.querySelectorAll(':scope > section'));
     const slideClassNodes = Array.from(doc.body.querySelectorAll('.slide'));
@@ -672,9 +747,9 @@ export function buildWebCaptureScript(): string {
     } catch (_) {}
   }
 
-  // 2. Fallback: look for slide sections or slide containers on the page
+  // 2. Fallback: look for Reveal.js or slide sections/containers on the page
   if (slides.length === 0) {
-    const selectors = ['[data-slide]', '.slide', 'section.slide', 'main > section', '.swiper-slide'];
+    const selectors = ['.reveal .slides > section', '[data-slide]', '.slide', 'section.slide', 'main > section', '.swiper-slide'];
     let nodes = [];
     for (const sel of selectors) {
       const found = Array.from(document.querySelectorAll(sel));
