@@ -37,6 +37,7 @@ import {
   AnnotationStroke,
   AnnotationTool,
   LASER_COLORS,
+  LaserMoveEvent,
   PresentationAnnotationLayer,
   RemoteLaserHandle,
 } from './PresentationAnnotationLayer';
@@ -417,7 +418,13 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
         }
         if (msg.type === 'laser') {
           if (msg.laser.active && msg.laser.slideId === currentSlideIdRef.current) {
-            remoteLaserRef.current?.pushPoint(msg.laser.x, msg.laser.y, msg.laser.color);
+            remoteLaserRef.current?.handleEvent({
+              active: true,
+              x: msg.laser.x,
+              y: msg.laser.y,
+              color: msg.laser.color,
+              phase: msg.laser.phase || 'hover',
+            });
           } else {
             remoteLaserRef.current?.hide();
           }
@@ -431,21 +438,19 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
     };
   }, [effectiveSyncId, viewRole, slides.length, isAudienceMode]);
 
-  const handleLaserMove = useCallback(
-    (pos: { active: boolean; x: number; y: number; color: string }) => {
-      syncBridgeRef.current?.send({
-        type: 'laser',
-        laser: {
-          active: pos.active,
-          x: pos.x,
-          y: pos.y,
-          color: pos.color,
-          slideId: currentSlideIdRef.current,
-        },
-      });
-    },
-    []
-  );
+  const handleLaserMove = useCallback((event: LaserMoveEvent) => {
+    syncBridgeRef.current?.send({
+      type: 'laser',
+      laser: {
+        active: event.active,
+        x: event.x,
+        y: event.y,
+        color: event.color,
+        slideId: currentSlideIdRef.current,
+        phase: event.phase,
+      },
+    });
+  }, []);
 
   const handleCopyAudienceLink = useCallback(async () => {
     try {
@@ -641,6 +646,7 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
   const annotationOverlay = useMemo(
     () => (
       <PresentationAnnotationLayer
+        slideId={currentSlide.id}
         tool={isAudienceMode ? 'pointer' : activeTool}
         color={strokeColor}
         laserColor={laserColor}
@@ -653,6 +659,7 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
       />
     ),
     [
+      currentSlide.id,
       isAudienceMode,
       activeTool,
       strokeColor,

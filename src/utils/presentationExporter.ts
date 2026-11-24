@@ -978,10 +978,14 @@ export async function exportStandalonePresentationHtml(
     var isErasing = false;
     var annRect = { left: 0, top: 0, width: 0, height: 0 };
     var annSize = { width: 0, height: 0, dpr: 1 };
-    var laserTrail = [];
+    var laserStrokes = [];
+    var activeLaserStroke = null;
+    var remoteActiveLaserStroke = null;
     var laserRaf = null;
     var laserCtx = null;
-    var LASER_TRAIL_MS = 380;
+    var LASER_HOLD_MS = 750;
+    var LASER_FADE_MS = 550;
+    var LASER_MAX_PTS = 900;
 
     function updateLaserDotStyle() {
       laserDot.style.background = 'radial-gradient(circle, #ffffff 0%, #ffffff 22%, ' + laserColor + ' 40%, ' + laserColor + '55 68%, transparent 100%)';
@@ -1008,6 +1012,7 @@ export async function exportStandalonePresentationHtml(
       laserCanvas.width = Math.max(1, Math.round(r.width * dpr));
       laserCanvas.height = Math.max(1, Math.round(r.height * dpr));
       renderDrawCanvas();
+      renderLaserCanvas();
     }
 
     function distToSegment(px, py, x1, y1, x2, y2) {
@@ -1159,40 +1164,102 @@ export async function exportStandalonePresentationHtml(
       broadcastState(true);
     }
 
-    function renderLaserTrailFrame() {
+    function clearLaserStrokes() {
+      laserStrokes = [];
+      activeLaserStroke = null;
+      remoteActiveLaserStroke = null;
+      if (laserRaf !== null) { cancelAnimationFrame(laserRaf); laserRaf = null; }
+      if (laserCtx) { laserCtx.setTransform(1, 0, 0, 1, 0, 0); laserCtx.clearRect(0, 0, laserCanvas.width, laserCanvas.height); }
+    }
+
+    function appendLaserPt(stroke, norm) {
+      var pts = stroke.points;
+      var last = pts[pts.length - 1];
+      if (!last) { pts.push(norm); return true; }
+      var dx = (norm.x - last.x) * (annSize.width || 1280);
+      var dy = (norm.y - last.y) * (annSize.height || 720);
+      if (Math.hypot(dx, dy) >= 2) {
+        if (pts.length < LASER_MAX_PTS) pts.push(norm);
+        return true;
+      }
+      return false;
+    }
+
+    function traceLaserPath(ctx, pts, w, h) {
+      ctx.beginPath();
+      if (pts.length === 1) {
+        ctx.moveTo(pts[0].x * w, pts[0].y * h);
+        ctx.lineTo(pts[0].x * w + 0.1, pts[0].y * h + 0.1);
+        return;
+      }
+      ctx.moveTo(pts[0].x * w, pts[0].y * h);
+      for (var i = 1; i < pts.length - 1; i++) {
+        var cx = pts[i].x * w, cy = pts[i].y * h;
+        var nx = (pts[i].x + pts[i + 1].x) * 0.5 * w;
+        var ny = (pts[i].y + pts[i + 1].y) * 0.5 * h;
+        ctx.quadraticCurveTo(cx, cy, nx, ny);
+      }
+      var last = pts[pts.length - 1];
+      ctx.lineTo(last.x * w, last.y * h);
+    }
+
+    function renderLaserCanvas() {
       if (!laserCtx) laserCtx = laserCanvas.getContext('2d', { desynchronized: true }) || laserCanvas.getContext('2d');
-      if (!laserCtx || annSize.width <= 0) { laserRaf = null; return; }
+      if (!laserCtx || annSize.width <= 0 || annSize.height <= 0) { laserRaf = null; return; }
       var now = performance.now();
-      var firstValid = 0;
-      while (firstValid < laserTrail.length && now - laserTrail[firstValid].t >= LASER_TRAIL_MS) firstValid++;
-      if (firstValid > 0) laserTrail.splice(0, firstValid);
+      var w = annSize.width, h = annSize.height;
+      var scale = Math.max(0.65, w / 1280);
+      var hasFading = false;
 
       laserCtx.setTransform(annSize.dpr, 0, 0, annSize.dpr, 0, 0);
-      laserCtx.clearRect(0, 0, annSize.width, annSize.height);
-      if (laserTrail.length > 1) {
-        var scale = Math.max(0.65, annSize.width / 1280);
-        laserCtx.lineCap = 'round';
-        laserCtx.lineJoin = 'round';
-        laserCtx.strokeStyle = laserColor;
-        for (var i = 1; i < laserTrail.length; i++) {
-          var p0 = laserTrail[i - 1], p1 = laserTrail[i];
-          var age = 1 - (now - p1.t) / LASER_TRAIL_MS;
-          if (age <= 0) continue;
-          laserCtx.beginPath();
-          laserCtx.moveTo(p0.x, p0.y);
-          laserCtx.lineTo(p1.x, p1.y);
-          laserCtx.globalAlpha = age * age * 0.55;
-          laserCtx.lineWidth = Math.max(1.5, 8.5 * scale * age);
-          laserCtx.stroke();
+      laserCtx.clearRect(0, 0, w, h);
+      laserCtx.lineCap = 'round';
+      laserCtx.lineJoin = 'round';
+
+      for (var i = laserStrokes.length - 1; i >= 0; i--) {
+        var s = laserStrokes[i];
+        var alpha = 1;
+        if (s.releasedAt !== null) {
+          var elapsed = now - s.releasedAt;
+          if (elapsed >= LASER_HOLD_MS + LASER_FADE_MS) {
+            laserStrokes.splice(i, 1);
+            continue;
+          }
+          hasFading = true;
+          if (elapsed > LASER_HOLD_MS) {
+            var t = (elapsed - LASER_HOLD_MS) / LASER_FADE_MS;
+            var e = 1 - t;
+            alpha = e * e;
+          }
         }
-        laserCtx.globalAlpha = 1;
+        if (!s.points.length || alpha <= 0.005) continue;
+
+        traceLaserPath(laserCtx, s.points, w, h);
+        laserCtx.strokeStyle = s.color;
+        laserCtx.globalAlpha = alpha * 0.28;
+        laserCtx.lineWidth = Math.max(8, 15 * scale);
+        laserCtx.stroke();
+
+        traceLaserPath(laserCtx, s.points, w, h);
+        laserCtx.strokeStyle = s.color;
+        laserCtx.globalAlpha = alpha * 0.92;
+        laserCtx.lineWidth = Math.max(3.5, 6 * scale);
+        laserCtx.stroke();
+
+        traceLaserPath(laserCtx, s.points, w, h);
+        laserCtx.strokeStyle = '#ffffff';
+        laserCtx.globalAlpha = alpha * 0.85;
+        laserCtx.lineWidth = Math.max(1.4, 2.2 * scale);
+        laserCtx.stroke();
       }
-      if (laserTrail.length > 1) laserRaf = requestAnimationFrame(renderLaserTrailFrame);
+      laserCtx.globalAlpha = 1;
+
+      if (hasFading) laserRaf = requestAnimationFrame(renderLaserCanvas);
       else laserRaf = null;
     }
 
     function ensureLaserLoop() {
-      if (laserRaf === null) laserRaf = requestAnimationFrame(renderLaserTrailFrame);
+      if (laserRaf === null) laserRaf = requestAnimationFrame(renderLaserCanvas);
     }
 
     var toolOptionsHidden = false;
@@ -1236,10 +1303,8 @@ export async function exportStandalonePresentationHtml(
 
       if (!isLaser) {
         laserDot.style.opacity = '0';
-        laserTrail = [];
-        if (laserRaf !== null) { cancelAnimationFrame(laserRaf); laserRaf = null; }
-        if (laserCtx) { laserCtx.setTransform(1, 0, 0, 1, 0, 0); laserCtx.clearRect(0, 0, laserCanvas.width, laserCanvas.height); }
-        emitLaserSync(0, 0, false);
+        clearLaserStrokes();
+        emitLaserSync(0, 0, false, 'hide');
       }
       if (activeTool !== 'eraser') {
         eraserRing.style.opacity = '0';
@@ -1284,11 +1349,12 @@ export async function exportStandalonePresentationHtml(
       if (!pt) return;
       if (annLayer.setPointerCapture) annLayer.setPointerCapture(e.pointerId);
       if (activeTool === 'laser') {
+        activeLaserStroke = { points: [pt.norm], color: laserColor, releasedAt: null };
+        laserStrokes.push(activeLaserStroke);
         laserDot.style.opacity = '1';
-        laserDot.style.transform = 'translate3d(' + pt.px + 'px,' + pt.py + 'px,0) scale(1.25)';
-        laserTrail.push({ x: pt.px, y: pt.py, t: performance.now() });
-        ensureLaserLoop();
-        emitLaserSync(pt.norm.x, pt.norm.y, true);
+        laserDot.style.transform = 'translate3d(' + pt.px + 'px,' + pt.py + 'px,0) scale(1.18)';
+        renderLaserCanvas();
+        emitLaserSync(pt.norm.x, pt.norm.y, true, 'start');
         return;
       }
       if (activeTool === 'eraser') {
@@ -1305,24 +1371,29 @@ export async function exportStandalonePresentationHtml(
     annLayer.addEventListener('pointermove', function(e) {
       if (activeTool === 'pointer') return;
       if (activeTool === 'laser') {
-        var events = (e.getCoalescedEvents && e.getCoalescedEvents().length) ? e.getCoalescedEvents() : [e];
-        var now = performance.now();
-        var lastPt = null;
-        for (var i = 0; i < events.length; i++) {
-          var p = toLocalPt(events[i].clientX, events[i].clientY);
-          if (!p) continue;
-          lastPt = p;
-          var prev = laserTrail[laserTrail.length - 1];
-          if (!prev || Math.hypot(p.px - prev.x, p.py - prev.y) >= 2) {
-            laserTrail.push({ x: p.px, y: p.py, t: now });
+        if (activeLaserStroke) {
+          var events = (e.getCoalescedEvents && e.getCoalescedEvents().length) ? e.getCoalescedEvents() : [e];
+          var lastPt = null;
+          var mutated = false;
+          for (var i = 0; i < events.length; i++) {
+            var p = toLocalPt(events[i].clientX, events[i].clientY);
+            if (!p) continue;
+            lastPt = p;
+            if (appendLaserPt(activeLaserStroke, p.norm)) mutated = true;
           }
-        }
-        if (laserTrail.length > 72) laserTrail.splice(0, laserTrail.length - 72);
-        if (lastPt) {
-          laserDot.style.opacity = '1';
-          laserDot.style.transform = 'translate3d(' + lastPt.px + 'px,' + lastPt.py + 'px,0) scale(' + ((e.buttons & 1) ? 1.25 : 1) + ')';
-          ensureLaserLoop();
-          emitLaserSync(lastPt.norm.x, lastPt.norm.y, true);
+          if (lastPt) {
+            laserDot.style.opacity = '1';
+            laserDot.style.transform = 'translate3d(' + lastPt.px + 'px,' + lastPt.py + 'px,0) scale(1.18)';
+            if (mutated) renderLaserCanvas();
+            emitLaserSync(lastPt.norm.x, lastPt.norm.y, true, 'draw');
+          }
+        } else {
+          var hp = toLocalPt(e.clientX, e.clientY);
+          if (hp) {
+            laserDot.style.opacity = '1';
+            laserDot.style.transform = 'translate3d(' + hp.px + 'px,' + hp.py + 'px,0) scale(1)';
+            emitLaserSync(hp.norm.x, hp.norm.y, true, 'hover');
+          }
         }
         return;
       }
@@ -1370,9 +1441,21 @@ export async function exportStandalonePresentationHtml(
         annLayer.releasePointerCapture(e.pointerId);
       }
       if (activeTool === 'laser') {
-        if (e) {
-          var p = toLocalPt(e.clientX, e.clientY);
-          if (p) laserDot.style.transform = 'translate3d(' + p.px + 'px,' + p.py + 'px,0) scale(1)';
+        var p = e ? toLocalPt(e.clientX, e.clientY) : null;
+        if (activeLaserStroke) {
+          if (p) appendLaserPt(activeLaserStroke, p.norm);
+          activeLaserStroke.releasedAt = performance.now();
+          activeLaserStroke = null;
+          renderLaserCanvas();
+          ensureLaserLoop();
+        }
+        if (e && e.pointerType !== 'mouse') {
+          laserDot.style.opacity = '0';
+          if (p) emitLaserSync(p.norm.x, p.norm.y, true, 'end');
+          emitLaserSync(0, 0, false, 'hide');
+        } else if (p) {
+          laserDot.style.transform = 'translate3d(' + p.px + 'px,' + p.py + 'px,0) scale(1)';
+          emitLaserSync(p.norm.x, p.norm.y, true, 'end');
         }
         return;
       }
@@ -1397,8 +1480,9 @@ export async function exportStandalonePresentationHtml(
     annLayer.addEventListener('pointercancel', endPointer);
     annLayer.addEventListener('pointerleave', function() {
       if (activeTool === 'laser') {
+        if (activeLaserStroke) return;
         laserDot.style.opacity = '0';
-        emitLaserSync(0, 0, false);
+        emitLaserSync(0, 0, false, 'hide');
       }
       if (activeTool === 'eraser') { isErasing = false; eraserRing.style.opacity = '0'; }
     });
@@ -1519,6 +1603,7 @@ export async function exportStandalonePresentationHtml(
 
       try { history.replaceState(null, '', '#slide-' + (index + 1)); } catch (_) {}
       refreshAudienceLinks();
+      clearLaserStrokes();
       renderDrawCanvas();
     }
 
@@ -1657,8 +1742,9 @@ export async function exportStandalonePresentationHtml(
       if (!skipStorage) {
         if (payload.type === 'laser') {
           if (syncBc) return;
+          var isEdge = !payload.laser.active || payload.laser.phase === 'start' || payload.laser.phase === 'end' || payload.laser.phase === 'hide';
           var now = Date.now();
-          if (payload.laser.active && now - lastStorageLaserEmit < 45) return;
+          if (!isEdge && now - lastStorageLaserEmit < 45) return;
           lastStorageLaserEmit = now;
         }
         try { localStorage.setItem(syncStorageKey, JSON.stringify(env)); } catch (_) {}
@@ -1671,14 +1757,16 @@ export async function exportStandalonePresentationHtml(
       sendSync({ type: 'state', state: st });
     }
 
-    function emitLaserSync(normX, normY, active) {
+    function emitLaserSync(normX, normY, active, phase) {
       if (isAudienceMode) return;
+      var resolvedPhase = phase || (active ? 'hover' : 'hide');
+      var isEdge = !active || resolvedPhase === 'start' || resolvedPhase === 'end' || resolvedPhase === 'hide';
       var now = performance.now();
-      if (active && now - lastSyncLaserEmit < 16) return;
+      if (!isEdge && now - lastSyncLaserEmit < 16) return;
       lastSyncLaserEmit = now;
       sendSync({
         type: 'laser',
-        laser: { active: active, x: normX, y: normY, color: laserColor, slideId: getCurrentSlideId() }
+        laser: { active: active, x: normX, y: normY, color: laserColor, slideId: getCurrentSlideId(), phase: resolvedPhase }
       });
     }
 
@@ -1737,20 +1825,51 @@ export async function exportStandalonePresentationHtml(
         return;
       }
       if (p.type === 'laser' && p.laser) {
-        if (p.laser.active && p.laser.slideId === getCurrentSlideId() && annSize.width > 0) {
+        var lPhase = p.laser.phase || (p.laser.active ? 'hover' : 'hide');
+        if (p.laser.active && lPhase !== 'hide' && p.laser.slideId === getCurrentSlideId() && annSize.width > 0) {
           if (p.laser.color && p.laser.color !== laserColor) {
             laserColor = p.laser.color;
             updateLaserDotStyle();
           }
-          var rx = Math.max(0, Math.min(annSize.width, p.laser.x * annSize.width));
-          var ry = Math.max(0, Math.min(annSize.height, p.laser.y * annSize.height));
+          var normPt = {
+            x: Math.max(0, Math.min(1, Number(p.laser.x || 0))),
+            y: Math.max(0, Math.min(1, Number(p.laser.y || 0)))
+          };
+          var rx = normPt.x * annSize.width;
+          var ry = normPt.y * annSize.height;
+          var pressed = lPhase === 'start' || lPhase === 'draw';
           laserDot.style.opacity = '1';
-          laserDot.style.transform = 'translate3d(' + rx + 'px,' + ry + 'px,0) scale(1)';
-          laserTrail.push({ x: rx, y: ry, t: performance.now() });
-          if (laserTrail.length > 72) laserTrail.splice(0, laserTrail.length - 72);
-          ensureLaserLoop();
+          laserDot.style.transform = 'translate3d(' + rx + 'px,' + ry + 'px,0) scale(' + (pressed ? 1.18 : 1) + ')';
+
+          if (lPhase === 'start') {
+            if (remoteActiveLaserStroke) remoteActiveLaserStroke.releasedAt = performance.now();
+            remoteActiveLaserStroke = { points: [normPt], color: p.laser.color || laserColor, releasedAt: null };
+            laserStrokes.push(remoteActiveLaserStroke);
+            renderLaserCanvas();
+          } else if (lPhase === 'draw') {
+            if (!remoteActiveLaserStroke) {
+              remoteActiveLaserStroke = { points: [normPt], color: p.laser.color || laserColor, releasedAt: null };
+              laserStrokes.push(remoteActiveLaserStroke);
+              renderLaserCanvas();
+            } else if (appendLaserPt(remoteActiveLaserStroke, normPt)) {
+              renderLaserCanvas();
+            }
+          } else if (lPhase === 'end') {
+            if (remoteActiveLaserStroke) {
+              appendLaserPt(remoteActiveLaserStroke, normPt);
+              remoteActiveLaserStroke.releasedAt = performance.now();
+              remoteActiveLaserStroke = null;
+              renderLaserCanvas();
+              ensureLaserLoop();
+            }
+          }
         } else {
           laserDot.style.opacity = '0';
+          if (remoteActiveLaserStroke) {
+            remoteActiveLaserStroke.releasedAt = performance.now();
+            remoteActiveLaserStroke = null;
+            ensureLaserLoop();
+          }
         }
       }
     }

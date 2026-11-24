@@ -8,12 +8,15 @@ export interface SyncPresentationState {
   annotationsBySlide?: Record<string, AnnotationStroke[]>;
 }
 
+export type LaserSyncPhase = 'hover' | 'start' | 'draw' | 'end' | 'hide';
+
 export interface SyncLaserPayload {
   active: boolean;
   x: number;
   y: number;
   color: string;
   slideId: string;
+  phase?: LaserSyncPhase;
 }
 
 export type SyncMessagePayload =
@@ -160,7 +163,12 @@ export function createPresentationSyncBridge(
       const now = Date.now();
       if (payload.type === 'laser') {
         if (bc) return; // Keep high-frequency laser off localStorage when BroadcastChannel works
-        if (payload.laser.active && now - lastStorageLaserTs < 45) return;
+        const isLifecycleEdge =
+          payload.laser.phase === 'start' ||
+          payload.laser.phase === 'end' ||
+          payload.laser.phase === 'hide' ||
+          !payload.laser.active;
+        if (!isLifecycleEdge && now - lastStorageLaserTs < 45) return;
         lastStorageLaserTs = now;
       }
       try {
