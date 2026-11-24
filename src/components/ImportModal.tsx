@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { ASPECT_RATIO_LABELS, Deck, Slide, SlideTheme } from '../types/slideino';
 import {
+  AiPromptOptions,
   buildAiPromptTemplate,
   buildWebCaptureScript,
   extractMhtmlHtml,
@@ -21,6 +22,7 @@ import {
   ParsedImportResult,
   parseImportedHtml,
 } from '../utils/htmlImporter';
+import { LIBRARY_CATALOG } from '../data/libraries';
 
 interface ImportModalProps {
   isOpen: boolean;
@@ -83,6 +85,11 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   const [importTarget, setImportTarget] = useState<'append' | 'new-deck'>('append');
   const [copiedPrompt, setCopiedPrompt] = useState(false);
   const [copiedScript, setCopiedScript] = useState(false);
+  const [promptTopic, setPromptTopic] = useState('');
+  const [promptSlideCount, setPromptSlideCount] = useState<number | 'auto'>('auto');
+  const [promptFormat, setPromptFormat] = useState<'slideino' | 'revealjs'>('slideino');
+  const [promptIncludeNotes, setPromptIncludeNotes] = useState(true);
+  const [promptIncludeMotion, setPromptIncludeMotion] = useState(Boolean(deck.libraries.gsap));
   const [uploadNotice, setUploadNotice] = useState<{
     type: 'error' | 'h2d';
     message: string;
@@ -93,6 +100,10 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     setMode(initialMode);
     setUploadNotice(null);
   }, [initialMode, isOpen]);
+
+  useEffect(() => {
+    setPromptIncludeMotion(Boolean(deck.libraries.gsap));
+  }, [deck.libraries.gsap]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -110,9 +121,24 @@ export const ImportModal: React.FC<ImportModalProps> = ({
 
   const activeParsed: ParsedImportResult = uploadedImport ? uploadedImport.result : pastedParsed;
 
+  const promptOptions: AiPromptOptions = useMemo(
+    () => ({
+      topic: promptTopic,
+      slideCount: promptSlideCount,
+      outputFormat: promptFormat,
+      includeNotes: promptIncludeNotes,
+      includeMotion: promptIncludeMotion,
+    }),
+    [promptTopic, promptSlideCount, promptFormat, promptIncludeNotes, promptIncludeMotion]
+  );
+
   const promptText = useMemo(
-    () => buildAiPromptTemplate(deck, theme, deck.libraries),
-    [deck, theme]
+    () => buildAiPromptTemplate(deck, theme, deck.libraries, promptOptions),
+    [deck, theme, promptOptions]
+  );
+  const enabledLibrariesCount = useMemo(
+    () => LIBRARY_CATALOG.filter((lib) => deck.libraries[lib.id]).length,
+    [deck.libraries]
   );
   const captureScript = useMemo(() => buildWebCaptureScript(), []);
 
@@ -597,30 +623,134 @@ export const ImportModal: React.FC<ImportModalProps> = ({
 
         {mode === 'prompt' && (
           <div className="p-6 flex flex-col gap-4 overflow-y-auto">
-            <p className="text-sm text-slate-600 dark:text-slate-400">
-              Copy this tailored prompt into your preferred AI tool so the generated HTML and CSS slides automatically match your active theme variables ({theme.name}), screen size ({ASPECT_RATIO_LABELS[deck.aspectRatio] || deck.aspectRatio}), and enabled libraries.
-            </p>
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <p className="text-sm text-slate-600 dark:text-slate-400">
+                Copy this tailored prompt into any AI assistant so generated slides import cleanly into Slideino.
+              </p>
+              <span className="text-xs font-mono text-slate-500 dark:text-slate-400">
+                {theme.name} · {ASPECT_RATIO_LABELS[deck.aspectRatio] || deck.aspectRatio} · {enabledLibrariesCount} libs
+              </span>
+            </div>
 
-            <pre className="p-4 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-mono text-slate-800 dark:text-slate-200 overflow-x-auto whitespace-pre-wrap leading-relaxed max-h-72">
+            {/* Compact Prompt Customization Bar */}
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 p-3 rounded-lg bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800">
+              <div className="sm:col-span-6">
+                <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1">
+                  Topic &amp; Audience (optional)
+                </label>
+                <input
+                  type="text"
+                  value={promptTopic}
+                  onChange={(e) => setPromptTopic(e.target.value)}
+                  placeholder="e.g. Q4 Product Strategy for engineering leadership"
+                  className="w-full h-8 px-2.5 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500"
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1">
+                  Slides
+                </label>
+                <select
+                  value={String(promptSlideCount)}
+                  onChange={(e) =>
+                    setPromptSlideCount(e.target.value === 'auto' ? 'auto' : Number(e.target.value))
+                  }
+                  className="w-full h-8 px-2 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 cursor-pointer"
+                >
+                  <option value="auto">Auto</option>
+                  <option value="5">5 slides</option>
+                  <option value="8">8 slides</option>
+                  <option value="10">10 slides</option>
+                  <option value="12">12 slides</option>
+                  <option value="15">15 slides</option>
+                </select>
+              </div>
+
+              <div className="sm:col-span-4">
+                <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1">
+                  HTML Format
+                </label>
+                <div className="grid grid-cols-2 p-0.5 rounded-md bg-slate-200/70 dark:bg-slate-800 h-8">
+                  <button
+                    type="button"
+                    onClick={() => setPromptFormat('slideino')}
+                    className={`rounded text-[11px] font-medium transition-colors cursor-pointer ${
+                      promptFormat === 'slideino'
+                        ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 shadow-xs'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                    }`}
+                  >
+                    Slideino HTML
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPromptFormat('revealjs')}
+                    className={`rounded text-[11px] font-medium transition-colors cursor-pointer ${
+                      promptFormat === 'revealjs'
+                        ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 shadow-xs'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                    }`}
+                  >
+                    Reveal.js
+                  </button>
+                </div>
+              </div>
+
+              <div className="sm:col-span-12 flex flex-wrap items-center gap-4 pt-1 border-t border-slate-200/70 dark:border-slate-800/80">
+                <label className="inline-flex items-center gap-1.5 text-xs text-slate-700 dark:text-slate-300 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={promptIncludeNotes}
+                    onChange={(e) => setPromptIncludeNotes(e.target.checked)}
+                    className="rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500/40"
+                  />
+                  <span>Include Speaker Notes</span>
+                </label>
+
+                {(deck.libraries.gsap || deck.libraries.animatecss) && (
+                  <label className="inline-flex items-center gap-1.5 text-xs text-slate-700 dark:text-slate-300 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={promptIncludeMotion}
+                      onChange={(e) => setPromptIncludeMotion(e.target.checked)}
+                      className="rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500/40"
+                    />
+                    <span>Include Entrance Motion (GSAP / Reveal)</span>
+                  </label>
+                )}
+              </div>
+            </div>
+
+            <pre className="p-4 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-mono text-slate-800 dark:text-slate-200 overflow-x-auto whitespace-pre-wrap leading-relaxed max-h-64">
               {promptText}
             </pre>
 
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+            <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
               <button
                 type="button"
-                onClick={onClose}
-                className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                onClick={() => setMode('import')}
+                className="px-3 py-2 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
               >
-                Close
+                Paste Result in Import HTML →
               </button>
-              <button
-                type="button"
-                onClick={handleCopyPrompt}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 transition-colors cursor-pointer"
-              >
-                {copiedPrompt ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                <span>{copiedPrompt ? 'Copied Prompt' : 'Copy Prompt'}</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCopyPrompt}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 transition-colors cursor-pointer"
+                >
+                  {copiedPrompt ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                  <span>{copiedPrompt ? 'Copied Prompt' : 'Copy Prompt'}</span>
+                </button>
+              </div>
             </div>
           </div>
         )}

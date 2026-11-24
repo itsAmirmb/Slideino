@@ -368,26 +368,77 @@ export function parseImportedHtml(rawInput: string): ParsedImportResult {
     .filter(Boolean);
 
   if (commentParts.length > 1) {
-    const slides = commentParts.map((part, idx) => {
+    let hoistedSharedCss = '';
+    const workingParts = [...commentParts];
+
+    // If the first chunk is purely <style> block(s) with no visible markup, hoist it as shared deck CSS
+    const firstPart = workingParts[0];
+    const firstWithoutStyles = firstPart
+      .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '')
+      .replace(/<!--[\s\S]*?-->/g, '')
+      .trim();
+    if (firstWithoutStyles === '' && /<style\b/i.test(firstPart)) {
+      const styleMatches = Array.from(
+        firstPart.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)
+      )
+        .map((m) => m[1]?.trim() || '')
+        .filter(Boolean);
+      hoistedSharedCss = extractFontFacesFromCss(styleMatches.join('\n'), fontPool).trim();
+      workingParts.shift();
+    }
+
+    const extractFragmentMeta = (rawFragment: string) => {
+      const extractedNotes: string[] = [];
+      let htmlWithoutNotes = rawFragment.replace(
+        /<aside\b[^>]*class=["'][^"']*\bnotes\b[^"']*["'][^>]*>([\s\S]*?)<\/aside>/gi,
+        (_match, inner: string) => {
+          const text = inner.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+          if (text) extractedNotes.push(text);
+          return '';
+        }
+      );
+
+      const extractedStyles: string[] = [];
+      htmlWithoutNotes = htmlWithoutNotes.replace(
+        /<style\b[^>]*>([\s\S]*?)<\/style>/gi,
+        (_match, cssBody: string) => {
+          const cleaned = extractFontFacesFromCss(cssBody, fontPool).trim();
+          if (cleaned) extractedStyles.push(cleaned);
+          return '';
+        }
+      );
+
+      return {
+        html: htmlWithoutNotes.trim(),
+        css: extractedStyles.join('\n\n'),
+        notes: extractedNotes.join('\n\n'),
+      };
+    };
+
+    const slides = workingParts.map((part, idx) => {
       if (/<!doctype\s+html|<html[\s>]/i.test(part)) {
         return normalizeStandaloneDocument(part, idx, fontPool);
       }
+      const { html, css, notes } = extractFragmentMeta(part);
       return {
         id: makeSlideId(idx),
-        title: extractHeadingTitle(part, idx),
-        html: part,
-        css: '',
-        notes: '',
+        title: extractHeadingTitle(html || part, idx),
+        html: html || part,
+        css,
+        notes,
         transition: 'fade' as const,
       };
     });
-    const { sharedCss, uniqueCount, savedBytes } = finalizeFontFacePool(fontPool);
+
+    const { sharedCss: fontSharedCss, uniqueCount, savedBytes } = finalizeFontFacePool(fontPool);
+    const mergedSharedCss = [fontSharedCss, hoistedSharedCss].filter(Boolean).join('\n\n');
+
     return {
       detectedTitle: extractSingleFileDeckTitle(input),
-      sharedCss: sharedCss || undefined,
+      sharedCss: mergedSharedCss || undefined,
       deduplicatedFontCount: uniqueCount || undefined,
       savedBytes: savedBytes || undefined,
-      mode: 'multi-slide',
+      mode: slides.length > 1 ? 'multi-slide' : 'single-slide',
       sourceFormat: 'comment-delimited',
       slides,
     };
@@ -515,13 +566,20 @@ export function parseImportedHtml(rawInput: string): ParsedImportResult {
         mode: 'multi-slide',
         sourceFormat: sectionNodes.length > 1 ? 'sections' : 'slide-classes',
         slides: multiNodes.map((node, idx) => {
-          const html = node.outerHTML;
+          const clone = node.cloneNode(true) as HTMLElement;
+          const noteEls = Array.from(clone.querySelectorAll('aside.notes'));
+          const notes = noteEls
+            .map((el) => el.textContent?.trim() || '')
+            .filter(Boolean)
+            .join('\n\n');
+          noteEls.forEach((el) => el.remove());
+          const html = clone.outerHTML;
           return {
             id: makeSlideId(idx),
             title: extractHeadingTitle(html, idx),
             html,
             css: cleanedStyleBlocks,
-            notes: '',
+            notes,
             transition: 'fade',
           };
         }),
@@ -776,49 +834,145 @@ export function buildWebCaptureScript(): string {
 })();`;
 }
 
+export interface AiPromptOptions {
+  topic?: string;
+  slideCount?: number | 'auto';
+  outputFormat?: 'slideino' | 'revealjs';
+  includeNotes?: boolean;
+  includeMotion?: boolean;
+}
+
+const LIBRARY_PROMPT_GUIDANCE: Record<string, (includeMotion: boolean) => string> = {
+  tailwind: () =>
+    'Tailwind CSS (3.4): Utility classes work directly; combine layout/spacing utilities with Slideino CSS variables (var(--slide-*)) so theme switching stays intact.',
+  revealjs: () =>
+    'Reveal.js Compat: Classes .r-hstack, .r-vstack, .r-stack, .r-stretch, .r-frame, .r-fit-text, and .fragment (fade-up, fade-down, fade-left, fade-right, zoom-in) work natively. Do NOT load Reveal.js CDN files or call Reveal.initialize().',
+  lucide: () =>
+    'Lucide Icons: Use valid kebab-case icons like <i data-lucide="sparkles" style="width:24px;height:24px;color:var(--slide-accent);"></i>. Do NOT add Lucide script tags or call lucide.createIcons() (auto-initialized).',
+  gsap: (includeMotion) =>
+    includeMotion
+      ? 'GSAP (3.12): Available globally as `gsap`. Wrap entrance animations in `window.addEventListener("DOMContentLoaded", () => { if (typeof gsap === "undefined") return; ... })`, prefer `gsap.from(...)` / `gsap.timeline(...)` with crisp 0.4–0.8s durations and `power3.out` easing, and avoid infinite distracting loops (thumbnails auto-complete timelines).'
+      : 'GSAP (3.12): Available globally, but keep slides static or minimal-motion for this deck unless explicitly requested.',
+  chartjs: () =>
+    'Chart.js (4.x): Wrap each <canvas> in a fixed-height container (`position: relative; height: 300px;`), set `responsive: true, maintainAspectRatio: false`, and use unique canvas IDs per slide.',
+  mermaid: () =>
+    'Mermaid.js (11.x): Put diagram code directly inside `<div class="mermaid">...</div>` (never inside `<pre><code>`).',
+  katex: () => 'KaTeX: Use `$...$` for inline math and `$$...$$` for display equations.',
+  highlightjs: () =>
+    'Highlight.js: Wrap code blocks in `<pre><code class="language-ts">...</code></pre>` (auto-themed to light/dark).',
+  fontawesome: () => 'Font Awesome 6: Use `<i class="fa-solid fa-compass"></i>` icon elements.',
+  animatecss: (includeMotion) =>
+    includeMotion
+      ? 'Animate.css: Use subtle `animate__animated animate__fadeInUp` entrance classes sparingly.'
+      : 'Animate.css: Available, but prefer restrained static layouts for this deck.',
+  d3: () => 'D3.js (7.x): Available globally as `d3` for custom SVG visualizations inside dedicated container elements.',
+};
+
 export function buildAiPromptTemplate(
   deck: Deck,
   theme: SlideTheme,
-  libraries: LibraryConfig
+  libraries: LibraryConfig,
+  options: AiPromptOptions = {}
 ): string {
-  const enabledLibs = LIBRARY_CATALOG.filter((lib) => libraries[lib.id])
-    .map((lib) => `- ${lib.name} (${lib.usageHint})`)
+  const {
+    topic = '',
+    slideCount = 'auto',
+    outputFormat = 'slideino',
+    includeNotes = true,
+    includeMotion = Boolean(libraries.gsap),
+  } = options;
+
+  const enabledLibraryGuides = LIBRARY_CATALOG.filter((lib) => libraries[lib.id])
+    .map((lib) => {
+      const guideFn = LIBRARY_PROMPT_GUIDANCE[lib.id];
+      return `- ${guideFn ? guideFn(includeMotion) : `${lib.name} (${lib.usageHint})`}`;
+    })
     .join('\n');
 
-  const dims =
+  const customResourceLines =
+    deck.customResources && deck.customResources.length > 0
+      ? `\nAttached Deck External Resources (already loaded automatically):\n${deck.customResources
+          .map((res) => `- ${res.label} (${res.type}): ${res.url}`)
+          .join('\n')}\n`
+      : '';
+
+  const canvasGuidance =
     deck.aspectRatio === 'fluid'
-      ? 'Fluid responsive viewport (100% width x 100% height)'
+      ? [
+          '- Target stage: Fluid responsive viewport (100% width × 100% height).',
+          '- Use responsive Flexbox/CSS Grid layouts that adapt gracefully across desktop and tablet screens without horizontal overflow.',
+        ].join('\n')
       : deck.aspectRatio === 'auto'
-      ? 'Auto-fit canvas (1280x720px baseline, automatically scales larger content without clipping)'
-      : `${deck.aspectRatio} canvas (${ASPECT_RATIO_DIMENSIONS[deck.aspectRatio].width}x${ASPECT_RATIO_DIMENSIONS[deck.aspectRatio].height}px)`;
+      ? [
+          '- Target stage: Auto (Fit Content) — 1280×720px baseline that automatically scales denser content to fit without clipping.',
+          '- Design primarily for 1280×720px using clean Flexbox/Grid flow (avoid fixed `overflow: hidden` traps on inner content) so Slideino can accurately measure and scale taller blocks when needed.',
+        ].join('\n')
+      : [
+          `- Target stage: Fixed ${deck.aspectRatio} canvas (${ASPECT_RATIO_DIMENSIONS[deck.aspectRatio].width}×${ASPECT_RATIO_DIMENSIONS[deck.aspectRatio].height}px).`,
+          '- Each slide root must fill `width: 100%; height: 100%;` with outer breathing room (`padding: var(--slide-padding)`) and zero clipped text or scrollbars.',
+        ].join('\n');
 
-  return `Create a presentation slide deck in clean HTML and CSS compatible with Slideino.
+  const formatGuidance =
+    outputFormat === 'revealjs'
+      ? [
+          '- Return a single HTML code block using Reveal.js deck markup: `<div class="reveal"><div class="slides"><section>...</section></div></div>` (nested `<section>` vertical stacks are also supported).',
+          '- Place shared CSS in one `<style>` block above `.reveal`. Optional slide attributes supported: `data-background-color`, `data-background-gradient`, and `data-transition="fade|slide|zoom|none"`.',
+          '- Do NOT include `<html>`/`<head>` boilerplate, Reveal.js CDN `<script>`/`<link>` tags, or `Reveal.initialize()` — Slideino handles navigation, transitions, laser/drawing tools, and standalone export.',
+        ].join('\n')
+      : [
+          '- Return a single HTML code block containing ONLY the slides (no surrounding explanation text, and no `<html>`/`<head>`/`<body>` boilerplate).',
+          '- Separate each slide cleanly with `<!-- slide -->` on its own line.',
+          '- Put shared CSS once in a `<style>...</style>` block at the very top before the first `<!-- slide -->` (or per-slide `<style>` inside each slide).',
+        ].join('\n');
 
-Canvas & Aspect Ratio:
-- Target stage: ${dims}
-- Each slide root element should fill height: 100%; width: 100%; without vertical overflow.
-- Separate multiple slides with <!-- slide --> comments so Slideino imports each slide automatically.
+  const notesRule = includeNotes
+    ? '- Include concise presenter talking points inside `<aside class="notes">2–3 spoken sentences...</aside>` inside every slide (Slideino automatically extracts these into Speaker Notes and hides them on stage).'
+    : '- Omit speaker notes (`<aside class="notes">`) to keep the markup minimal.';
 
-Theme CSS Variables (already injected by Slideino — use these for automatic theme switching):
-- var(--slide-bg)        /* Current: ${theme.tokens.bg} */
-- var(--slide-surface)   /* Current: ${theme.tokens.surface} */
-- var(--slide-text)      /* Current: ${theme.tokens.text} */
-- var(--slide-muted)     /* Current: ${theme.tokens.muted} */
-- var(--slide-accent)    /* Current: ${theme.tokens.accent} */
-- var(--slide-border)    /* Current: ${theme.tokens.border} */
-- var(--slide-font-display), var(--slide-font-body), var(--slide-font-mono)
-- var(--slide-radius), var(--slide-padding)
+  const countLine =
+    slideCount === 'auto'
+      ? '- Length: Choose an optimal narrative arc (typically 6–10 slides).'
+      : `- Length: Generate exactly ${slideCount} slides with a clear beginning, middle, and closing takeaway.`;
 
-Enabled Runtime Libraries (ready to use without adding CDN tags):
-${enabledLibs || '- Pure HTML & CSS'}
+  const topicBlock = topic.trim()
+    ? topic.trim()
+    : '[Describe your presentation topic, target audience, key points, and desired tone here]';
 
-Accessibility & Design Requirements:
-- Maintain WCAG AA contrast (at least 4.5:1 for body text).
-- Use semantic headings (<h1>, <h2>, <h3>) and alt text on all images.
-- Keep copy concise (35-65 words per slide) with generous whitespace.
+  return `Create a production-quality HTML & CSS presentation deck engineered for direct import into Slideino.
 
-Topic to generate slides for:
-[Describe your presentation topic, audience, and number of slides here]`;
+1. Output Format & Import Rules
+${formatGuidance}
+${notesRule}
+${countLine}
+- Do NOT add CDN <script> or <link> tags for any enabled library listed below — Slideino injects them automatically and bundles clean standalone exports.
+
+2. Canvas, Layout & Visual Editor Compatibility
+${canvasGuidance}
+- Use clean semantic HTML elements (<section>, <header>, <article>, <div>, <ul>, <span> for inline highlights) and CSS Flexbox/Grid rather than brittle absolute positioning or canvas-rendered text so every element can be edited, moved, styled, and grouped/ungrouped directly in Slideino's Visual Editor.
+
+3. Theme CSS Variables (${theme.name} — ${theme.isDark ? 'Dark' : 'Light'} Mode)
+Use these pre-injected CSS custom properties instead of hardcoding clashing colors so switching themes updates the entire deck seamlessly:
+- var(--slide-bg)           /* Current: ${theme.tokens.bg} */
+- var(--slide-surface)      /* Current: ${theme.tokens.surface} */
+- var(--slide-text)         /* Current: ${theme.tokens.text} */
+- var(--slide-muted)        /* Current: ${theme.tokens.muted} */
+- var(--slide-accent)       /* Current: ${theme.tokens.accent} */
+- var(--slide-border)       /* Current: ${theme.tokens.border} */
+- var(--slide-font-display) /* Headings */
+- var(--slide-font-body)    /* Body copy */
+- var(--slide-font-mono)    /* Metrics, labels & code */
+- var(--slide-font-size), var(--slide-radius), var(--slide-padding)
+
+4. Enabled Runtime Libraries (Ready to Use — No CDN Tags Needed)
+${enabledLibraryGuides || '- Pure semantic HTML & CSS (no external libraries enabled)'}
+${customResourceLines}
+5. Design & Accessibility Standards
+- Vary slide layouts across the deck (hero opener, asymmetric split, KPI metric grid, visual diagram/chart, comparison or timeline, decisive closing slide) — never repeat identical bullet lists.
+- Keep copy scannable (35–65 words per slide), maintain WCAG AA contrast (>= 4.5:1 body text, >= 3:1 headings), use semantic headings (<h1>, <h2>, <h3>), and provide alt text on all images.
+- Use crisp Lucide icons (when enabled) or clean inline SVG diagrams instead of generic emojis.
+
+6. Presentation Brief
+${topicBlock}`;
 }
 
 export function exportStandaloneHtml(deck: Deck, theme: SlideTheme, origin: string): string {
