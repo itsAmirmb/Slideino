@@ -210,6 +210,8 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
   }
 
   function getCanvasRoot() {
+    var revealSec = document.body ? document.body.querySelector('.reveal .slides > section') : null;
+    if (revealSec) return revealSec;
     var sc = document.body ? document.body.querySelector(':scope > .slide-container') : null;
     return sc || document.body;
   }
@@ -223,7 +225,17 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
     if (!el || el === document.documentElement || el === document.body) return true;
     var root = getCanvasRoot();
     if (el === root) return true;
-    if (el.classList && el.classList.contains('slide-container')) return true;
+    if (el.id === 'bg' || el.id === 'toolbar' || el.id === 'progress' || el.id === 'overview' || el.id === 'rotate') return true;
+    if (
+      el.classList &&
+      (el.classList.contains('slide-container') ||
+        el.classList.contains('reveal') ||
+        el.classList.contains('slides') ||
+        el.classList.contains('vignette') ||
+        el.classList.contains('hero-canvas'))
+    ) {
+      return true;
+    }
     return false;
   }
 
@@ -588,7 +600,7 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
     if (IS_FULL_DOC) {
       var docClone = document.documentElement.cloneNode(true);
       docClone.querySelectorAll(
-        '[data-slideino-editor="true"], [data-slideino-autofont="true"], [data-slideino-tokens="true"], [data-slideino-shared="true"], [data-slideino-overrides="true"], [data-slideino-theme="true"], [data-slideino-runtime="true"], #__slideino_editor_overlay__'
+        '[data-slideino-editor="true"], [data-slideino-autofont="true"], [data-slideino-tokens="true"], [data-slideino-shared="true"], [data-slideino-overrides="true"], [data-slideino-theme="true"], [data-slideino-runtime="true"], [data-slideino-reveal="true"], [data-slideino-reveal-shim="true"], [data-slideino-reveal-single-css="true"], #__slideino_editor_overlay__'
       ).forEach(function(n) { n.remove(); });
       stripEditorAttrs(docClone);
       return '<!doctype html>\\n' + docClone.outerHTML;
@@ -596,7 +608,7 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
 
     var bodyClone = document.body.cloneNode(true);
     bodyClone.querySelectorAll(
-      '[data-slideino-editor="true"], [data-slideino-autofont="true"], [data-slideino-runtime="true"], #__slideino_editor_overlay__'
+      '[data-slideino-editor="true"], [data-slideino-autofont="true"], [data-slideino-runtime="true"], [data-slideino-reveal="true"], [data-slideino-reveal-shim="true"], [data-slideino-reveal-single-css="true"], #__slideino_editor_overlay__'
     ).forEach(function(n) { n.remove(); });
     stripEditorAttrs(bodyClone);
     return bodyClone.innerHTML.trim();

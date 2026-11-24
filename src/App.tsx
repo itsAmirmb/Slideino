@@ -275,11 +275,12 @@ export default function App() {
 
   const handleImportSlides = useCallback(
     (slides: Slide[], target: 'append' | 'new-deck', title?: string, sharedCss?: string) => {
+      const hasOversizedSlide = slides.some((s) => {
+        const detected = detectSlideStaticDimensions(s.html, s.css);
+        return Boolean(detected && (detected.width > 1280 || detected.height > 720));
+      });
+
       if (target === 'new-deck') {
-        const hasOversizedSlide = slides.some((s) => {
-          const detected = detectSlideStaticDimensions(s.html, s.css);
-          return Boolean(detected && (detected.width > 1280 || detected.height > 720));
-        });
         const newDeck: Deck = {
           id: `deck-${Date.now()}`,
           title: title || 'Imported AI Presentation',
@@ -305,6 +306,7 @@ export default function App() {
       const startIndex = activeDeck.slides.length;
       updateActiveDeck((d) => ({
         ...d,
+        aspectRatio: hasOversizedSlide && d.aspectRatio === '16:9' ? 'auto' : d.aspectRatio,
         sharedCss: mergeSharedCss(d.sharedCss, sharedCss),
         updatedAt: new Date().toISOString(),
         slides: [...d.slides, ...slides],

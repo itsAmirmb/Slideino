@@ -491,8 +491,25 @@ export function parseImportedHtml(rawInput: string): ParsedImportResult {
       }
 
       if (flattenedSections.length > 0) {
-        const { sharedCss, uniqueCount, savedBytes } = finalizeFontFacePool(fontPool);
-        const revealSlides: Slide[] = flattenedSections.map((sec, idx) => {
+        const isFullHtmlDoc = /<!doctype\s+html|<html[\s>]/i.test(input);
+        const hasExternalHeadAssets = Boolean(
+          doc.head?.querySelector('link[rel="stylesheet"], script[src]')
+        );
+        const hasInlineScripts = Array.from(doc.querySelectorAll('script')).some(
+          (s) => !s.getAttribute('src') && Boolean(s.textContent?.trim())
+        );
+        const hasAmbientChrome = Array.from(doc.body?.children || []).some((el) => {
+          const tag = el.tagName.toLowerCase();
+          return !el.classList.contains('reveal') && tag !== 'script' && tag !== 'style';
+        });
+        const isRichStandaloneReveal =
+          isFullHtmlDoc &&
+          (hasExternalHeadAssets ||
+            hasInlineScripts ||
+            hasAmbientChrome ||
+            Boolean(cleanedStyleBlocks));
+
+        const extractSlideMeta = (sec: Element, idx: number) => {
           const clone = sec.cloneNode(true) as HTMLElement;
           const noteEls = Array.from(clone.querySelectorAll('aside.notes'));
           const notes = noteEls
@@ -521,11 +538,167 @@ export function parseImportedHtml(rawInput: string): ParsedImportResult {
               ? 'slide'
               : 'fade';
 
-          clone.classList.add('reveal-slide');
-          const html = clone.outerHTML;
+          const dataTitle = clone.getAttribute('data-title')?.trim();
+          const title = (
+            dataTitle || extractHeadingTitle(clone.outerHTML, idx)
+          ).slice(0, 80);
+
+          return { clone, notes, backgroundOverride, transition, title };
+        };
+
+        if (isRichStandaloneReveal) {
+          // Detect logical Reveal.js stage size (e.g. 1920x1080) from JS config, CSS .slides, or full-bleed canvases
+          const detectRevealStage = (): { width: number; height: number } | null => {
+            const scriptTexts = Array.from(doc.querySelectorAll('script'))
+              .map((s) => s.textContent || '')
+              .join('\n');
+            const jsMatches = Array.from(
+              scriptTexts.matchAll(
+                /\bwidth\s*:\s*(\d{3,4})\b[\s\S]{0,160}?\bheight\s*:\s*(\d{3,4})\b/g
+              )
+            );
+            for (const m of jsMatches) {
+              const w = Number(m[1]);
+              const h = Number(m[2]);
+              if (w >= 480 && w <= 3840 && h >= 320 && h <= 2400) {
+                return { width: w, height: h };
+              }
+            }
+            const cssSlidesMatch = rawStyleBlocks.match(
+              /\.slides\s*\{[^}]*?\bwidth\s*:\s*(\d{3,4})px[^}]*?\bheight\s*:\s*(\d{3,4})px/i
+            );
+            if (cssSlidesMatch) {
+              const w = Number(cssSlidesMatch[1]);
+              const h = Number(cssSlidesMatch[2]);
+              if (w >= 480 && w <= 3840 && h >= 320 && h <= 2400) {
+                return { width: w, height: h };
+              }
+            }
+            const canvasMatch = input.match(
+              /<canvas[^>]*\bdata-w=["'](\d{3,4})["'][^>]*\bdata-h=["'](\d{3,4})["']/i
+            );
+            if (canvasMatch) {
+              const w = Number(canvasMatch[1]);
+              const h = Number(canvasMatch[2]);
+              if (w >= 480 && w <= 3840 && h >= 320 && h <= 2400) {
+                return { width: w, height: h };
+              }
+            }
+            return detectSlideStaticDimensions(input, rawStyleBlocks);
+          };
+
+          const stageDims = detectRevealStage();
+
+          // Build a clean full-document shell once (preserving lang, dir, fonts, CSS, ambient layers, and custom scripts)
+          const shellDoc = parser.parseFromString(input, 'text/html');
+          shellDoc
+            .querySelectorAll(
+              'meta[http-equiv="content-security-policy" i], meta[name="referrer" i]'
+            )
+            .forEach((el) => el.remove());
+
+          // Strip core external Reveal.js script tags (Slideino's single-slide Reveal shim runs locally with zero CDN latency or sandbox History errors)
+          shellDoc.querySelectorAll('script').forEach((scriptEl) => {
+            const src = scriptEl.getAttribute('src')?.trim() || '';
+            const code = scriptEl.textContent?.trim() || '';
+            if (!src && !code) {
+              scriptEl.remove();
+              return;
+            }
+            if (src && /(?:^|\/)reveal(?:\.min)?\.js(?:[?#]|$)/i.test(src)) {
+              scriptEl.remove();
+            }
+          });
+
+          // Deduplicate @font-face rules into deck sharedCss (keep all regular layout/visual CSS intact per slide)
+          const standaloneFontPool = createFontFacePool();
+          shellDoc.querySelectorAll('style').forEach((styleEl) => {
+            const rawCss = styleEl.textContent || '';
+            if (rawCss.includes('@font-face')) {
+              const stripped = extractFontFacesFromCss(rawCss, standaloneFontPool).trim();
+              if (!stripped) {
+                styleEl.remove();
+              } else {
+                styleEl.textContent = stripped;
+              }
+            }
+          });
+
+          shellDoc.documentElement.setAttribute('data-slideino-reveal-single', 'true');
+          if (stageDims) {
+            const stageVal = `${stageDims.width}x${stageDims.height}`;
+            shellDoc.documentElement.setAttribute('data-slideino-stage', stageVal);
+            let stageMeta = shellDoc.head?.querySelector('meta[name="slideino-stage"]');
+            if (!stageMeta && shellDoc.head) {
+              stageMeta = shellDoc.createElement('meta');
+              stageMeta.setAttribute('name', 'slideino-stage');
+              shellDoc.head.appendChild(stageMeta);
+            }
+            stageMeta?.setAttribute('content', stageVal);
+          }
+
+          const shellSlidesRoot = shellDoc.querySelector('.reveal .slides, .reveal > .slides');
+          const revealSlides: Slide[] = flattenedSections.map((sec, idx) => {
+            const { clone, notes, backgroundOverride, transition, title } = extractSlideMeta(
+              sec,
+              idx
+            );
+            clone.classList.add('present', 'show');
+
+            if (shellSlidesRoot) {
+              shellSlidesRoot.innerHTML = '';
+              shellSlidesRoot.appendChild(shellDoc.importNode(clone, true));
+            }
+            if (shellDoc.head) {
+              let titleEl = shellDoc.head.querySelector('title');
+              if (!titleEl) {
+                titleEl = shellDoc.createElement('title');
+                shellDoc.head.appendChild(titleEl);
+              }
+              titleEl.textContent = title;
+            }
+
+            const html = `<!doctype html>\n${shellDoc.documentElement.outerHTML}`;
+            return {
+              id: makeSlideId(idx),
+              title,
+              html,
+              css: '',
+              notes,
+              transition,
+              backgroundOverride,
+              standalone: true,
+            };
+          });
+
+          const { sharedCss, uniqueCount, savedBytes } =
+            finalizeFontFacePool(standaloneFontPool);
+          return {
+            detectedTitle,
+            sharedCss: sharedCss || undefined,
+            deduplicatedFontCount: uniqueCount || undefined,
+            savedBytes: savedBytes || undefined,
+            mode: revealSlides.length > 1 ? 'multi-slide' : 'single-slide',
+            sourceFormat: 'revealjs',
+            slides: revealSlides,
+          };
+        }
+
+        // Lightweight Reveal.js HTML fragment (themeable in Slideino)
+        const { sharedCss, uniqueCount, savedBytes } = finalizeFontFacePool(fontPool);
+        const cssUsesRevealSelector = /\.reveal\b/i.test(cleanedStyleBlocks);
+        const revealSlides: Slide[] = flattenedSections.map((sec, idx) => {
+          const { clone, notes, backgroundOverride, transition, title } = extractSlideMeta(
+            sec,
+            idx
+          );
+          clone.classList.add('reveal-slide', 'present');
+          const html = cssUsesRevealSelector
+            ? `<div class="reveal"><div class="slides">${clone.outerHTML}</div></div>`
+            : clone.outerHTML;
           return {
             id: makeSlideId(idx),
-            title: extractHeadingTitle(html, idx),
+            title,
             html,
             css: cleanedStyleBlocks,
             notes,

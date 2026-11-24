@@ -1,0 +1,1778 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Apache Flink — پردازش جریانی حالت‌دار</title>
+<meta name="description" content="ارائهٔ سینمایی و تعاملی دربارهٔ Apache Flink">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5/dist/reveal.css">
+<style>
+/* ==========================================================
+   Apache Flink — Cinematic Keynote · styles
+   Stage: 1920×1080 (scaled by Reveal.js / mini engine)
+   ========================================================== */
+@property --a { syntax: '<angle>'; initial-value: 0deg; inherits: false; }
+
+:root {
+  --bg0: #02040b; --bg1: #060a1a; --navy: #0a1129;
+  --blue: #3b82f6; --cyan: #22d3ee; --violet: #8b5cf6; --magenta: #e879f9;
+  --green: #34d399; --amber: #fbbf24; --red: #fb7185;
+  --ink: #e8eefc; --mute: #8f9cc0; --line: rgba(120, 150, 255, .16);
+  --font: 'Vazirmatn', 'Segoe UI', Tahoma, system-ui, -apple-system, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  --grad: linear-gradient(100deg, #22d3ee 0%, #3b82f6 30%, #8b5cf6 60%, #e879f9 85%, #22d3ee 100%);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg0); color: var(--ink); font-family: var(--font); overflow: hidden; }
+body {
+  background:
+    radial-gradient(1200px 700px at 85% -10%, rgba(139, 92, 246, .20), transparent 60%),
+    radial-gradient(1000px 700px at 5% 110%, rgba(34, 211, 238, .14), transparent 60%),
+    linear-gradient(180deg, var(--bg1), var(--bg0));
+}
+#bg { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; }
+.vignette { position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background-image: linear-gradient(rgba(120,150,255,.045) 1px, transparent 1px), linear-gradient(90deg, rgba(120,150,255,.045) 1px, transparent 1px);
+  background-size: 64px 64px;
+  -webkit-mask-image: radial-gradient(ellipse at center, #000 20%, transparent 75%);
+          mask-image: radial-gradient(ellipse at center, #000 20%, transparent 75%); }
+
+/* ---------- engine containers ---------- */
+.reveal { position: relative; z-index: 1; font-family: var(--font); font-size: 28px; color: var(--ink); }
+.reveal .slides { text-align: right; }
+.reveal .slides > section {
+  padding: 52px 80px 104px; display: none; flex-direction: column; gap: 22px;
+  text-align: right; line-height: 1.5; font-weight: 400;
+}
+.reveal ul, .reveal ol { margin: 0; padding: 0; text-align: inherit; list-style: none; }
+.reveal pre { width: auto; margin: 0; box-shadow: none; font-size: inherit; line-height: inherit; }
+.reveal h1, .reveal h2, .reveal h3, .reveal h4 { margin: 0; text-transform: none; font-family: var(--font); color: var(--ink); text-shadow: none; }
+.reveal p { margin: 0; }
+.reveal code { font-family: var(--mono); font-size: .86em; color: var(--cyan); background: rgba(34,211,238,.08); padding: 1px 7px; border-radius: 6px; direction: ltr; unicode-bidi: isolate; }
+
+/* mini engine (used when Reveal.js is unavailable, e.g. offline) */
+html.no-reveal .reveal { position: fixed; inset: 0; overflow: hidden; }
+html.no-reveal .slides { position: absolute; left: 50%; top: 50%; width: 1920px; height: 1080px; transform-origin: 0 0; }
+html.no-reveal .slides > section { position: absolute; inset: 0; opacity: 0; transition: opacity .7s ease, transform .7s cubic-bezier(.2,.7,.2,1); transform: scale(1.015); pointer-events: none; }
+html.no-reveal .slides > section.present, html.no-reveal .slides > section.leaving { display: flex; }
+html.no-reveal .slides > section.present.show { opacity: 1; transform: none; pointer-events: auto; }
+
+/* ---------- typography ---------- */
+h2 { font-size: 66px; font-weight: 800; line-height: 1.25; letter-spacing: -.01em; }
+h3 { font-size: 34px; font-weight: 700; }
+h4 { font-size: 28px; font-weight: 700; display: flex; align-items: center; gap: 10px; }
+.small { font-size: 23px; color: var(--mute); line-height: 1.65; }
+.lead { font-size: 36px; line-height: 1.75; color: #cbd6f5; }
+.lead b, .tagline b { color: var(--ink); font-weight: 800; }
+.ltr { direction: ltr; unicode-bidi: isolate; display: inline-block; }
+b { font-weight: 800; }
+
+.grad { background: var(--grad); background-size: 240% 100%; -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; color: transparent; }
+.mega .grad { animation: gradShift 7s linear infinite; }
+.grad.alt { animation-direction: reverse; }
+@keyframes gradShift { to { background-position: -240% 0; } }
+
+.eyebrow { display: inline-flex; align-items: center; gap: 12px; font-size: 22px; font-weight: 600; letter-spacing: .06em; color: var(--cyan); }
+.eyebrow::before { content: ''; width: 44px; height: 2px; background: linear-gradient(90deg, transparent, var(--cyan)); }
+.eyebrow i { width: 22px; height: 22px; }
+.slide-head { display: flex; flex-direction: column; gap: 4px; flex: none; }
+
+/* kinetic words */
+.w { display: inline-block; overflow: hidden; vertical-align: top; padding: .1em 0 .2em; margin: -.1em 0 -.2em; }
+.wi[dir=ltr] { unicode-bidi: isolate; }
+.wi { display: inline-block; will-change: transform, opacity; }
+
+/* lucide icons */
+i[data-lucide], svg.lucide { width: 28px; height: 28px; stroke-width: 1.8; color: var(--cyan); flex: none; }
+
+/* ---------- animated gradient border ---------- */
+.card, .demo-frame {
+  position: relative; border-radius: 22px; padding: 22px 26px;
+  background: linear-gradient(160deg, rgba(22, 32, 70, .92), rgba(7, 11, 28, .94));
+  box-shadow: inset 0 0 0 1px rgba(120, 150, 255, .08);
+}
+.card::before, .demo-frame::before {
+  content: ''; position: absolute; inset: 0; padding: 1.6px; border-radius: inherit; pointer-events: none;
+  background: conic-gradient(from var(--a), transparent 0 55%, rgba(59,130,246,.9) 66%, var(--cyan) 76%, var(--violet) 88%, var(--magenta) 96%, transparent 100%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+}
+.card.hot::before, .demo-frame::before { animation: spin 6s linear infinite; }
+.card:nth-child(2n)::before { --a: 90deg; }
+.card:nth-child(3n)::before { --a: 200deg; }
+@keyframes spin { to { --a: 360deg; } }
+.demo-frame { padding: 0; overflow: visible; flex: none; }
+.demo-frame canvas, .demo-frame svg { display: block; width: 100%; height: auto; border-radius: 22px; }
+.card.hot { background: linear-gradient(160deg, rgba(40, 40, 110, .55), rgba(10, 14, 36, .62)); }
+.card h4 { margin-bottom: 8px; }
+.card p { color: var(--mute); font-size: 23px; }
+.card > i[data-lucide], .card > svg.lucide { margin-bottom: 8px; }
+
+/* pause all decorative loops for hidden slides (performance) */
+.reveal .slides section:not(.present) *, .reveal .slides section:not(.present) *::before, .reveal .slides section:not(.present) *::after { animation-play-state: paused !important; }
+body.paused .reveal *, body.paused .reveal *::before, body.paused .reveal *::after { animation-play-state: paused !important; }
+
+/* ---------- 01 opening ---------- */
+#s-open { align-items: center; justify-content: center; text-align: center; padding-bottom: 80px; }
+.hero-canvas { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; }
+.hero-canvas.dim { opacity: .9; }
+.open-wrap { position: relative; z-index: 2; display: flex; flex-direction: column; align-items: center; gap: 22px; }
+.mega { font-size: 250px; font-weight: 900; line-height: 1; letter-spacing: -.035em; font-family: 'Vazirmatn', 'Inter', sans-serif; text-shadow: 0 0 80px rgba(59,130,246,.35); }
+.mega .wi { filter: drop-shadow(0 0 30px rgba(34,211,238,.35)); }
+.tagline { font-size: 44px; color: #cbd6f5; font-weight: 400; }
+.chips { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; margin-top: 6px; }
+.chip { display: inline-flex; align-items: center; gap: 10px; padding: 10px 22px; border-radius: 999px; font-size: 24px; font-family: var(--mono); color: #cfe0ff;
+  background: rgba(20, 30, 70, .55); border: 1px solid rgba(120, 150, 255, .28); }
+.chip i { width: 22px; height: 22px; }
+.hint { margin-top: 28px; font-size: 21px; color: var(--mute); }
+kbd { font-family: var(--mono); font-size: .8em; padding: 2px 9px; border-radius: 8px; border: 1px solid rgba(120,150,255,.35); background: rgba(20,30,70,.6); color: var(--ink); }
+
+/* ---------- 02 big picture ---------- */
+.split { display: flex; gap: 40px; flex: 1; min-height: 0; align-items: center; }
+.split .col { flex: 1; display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+.problem { padding: 4px 0; }
+.problem h3 { font-size: 30px; color: var(--cyan); margin-bottom: 14px; }
+.plist li { display: flex; align-items: center; gap: 16px; font-size: 29px; padding: 10px 0; border-bottom: 1px dashed var(--line); }
+.plist li:last-child { border: 0; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.grid2.two-cols .card { padding: 20px 28px; }
+.grid2.two-cols, .grid3 { direction: ltr; }
+.grid2.two-cols .card, .grid3 .card { direction: rtl; }
+.latin-head { direction: ltr; text-align: right; }
+.grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.grid2 .card h4 { font-size: 27px; }
+.grid2 .card p { font-size: 21px; }
+.flow-mini { display: flex; align-items: center; direction: ltr; gap: 0; margin-top: 6px; }
+.fm-node { flex: none; width: 210px; padding: 22px 14px; text-align: center; border-radius: 20px; background: rgba(15, 22, 52, .7); border: 1px solid rgba(120,150,255,.25);
+  display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.fm-node b { font-size: 34px; font-family: 'Inter', var(--font); }
+.fm-node small { color: var(--mute); font-size: 17px; font-family: var(--mono); }
+.fm-node.core { border-color: transparent; background: linear-gradient(160deg, rgba(40,50,130,.7), rgba(15,20,50,.7)); box-shadow: 0 0 60px -10px rgba(139,92,246,.6), 0 0 0 1.5px rgba(34,211,238,.6); }
+.fm-wire { position: relative; flex: 1; height: 4px; background: linear-gradient(90deg, rgba(34,211,238,.25), rgba(139,92,246,.25)); border-radius: 4px; }
+.fm-wire span { position: absolute; top: -5px; width: 14px; height: 14px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 14px var(--cyan); animation: pkt 2.4s linear infinite; }
+.fm-wire span:nth-child(2) { animation-delay: .8s; background: var(--violet); box-shadow: 0 0 14px var(--violet); }
+.fm-wire span:nth-child(3) { animation-delay: 1.6s; background: var(--magenta); box-shadow: 0 0 14px var(--magenta); }
+@keyframes pkt { from { left: -4%; opacity: 0; } 10% { opacity: 1; } 90% { opacity: 1; } to { left: 100%; opacity: 0; } }
+
+/* ---------- 03 evolution ---------- */
+.evo { position: relative; flex: 1; display: flex; flex-direction: column; gap: 26px; justify-content: center; }
+.evo-line { display: none; position: absolute; left: 0; right: 0; top: 36px; width: 100%; height: 40px; overflow: visible; }
+.evo-line path { fill: none; stroke: url(#none); stroke: var(--cyan); stroke-width: 2; stroke-dasharray: 10 12; opacity: .45; }
+.evo-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 26px; position: relative; }
+.era { padding: 28px 30px 26px; display: flex; flex-direction: column; gap: 14px; }
+.era h3 { font-size: 36px; }
+.era p { font-size: 25px; line-height: 1.7; }
+.era-num { position: absolute; top: -22px; right: 28px; width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; font-size: 24px; background: var(--bg1); border: 2px solid var(--cyan); color: var(--cyan); box-shadow: 0 0 20px rgba(34,211,238,.5); }
+.era-vis { position: relative; height: 84px; border-radius: 14px; background: rgba(4, 7, 20, .6); border: 1px solid var(--line); overflow: hidden; direction: ltr; display: flex; align-items: center; padding: 0 14px; gap: 8px; }
+.v-batch i { display: block; height: 34px; border-radius: 8px; width: 0; background: linear-gradient(90deg, var(--blue), var(--violet)); animation: batchFill 4s ease-in-out infinite; }
+@keyframes batchFill { 0% { width: 0; opacity: 1; } 70% { width: 100%; opacity: 1; } 85% { width: 100%; opacity: 1; filter: brightness(1.8); } 100% { width: 100%; opacity: 0; } }
+.v-micro i { flex: 1; height: 34px; border-radius: 8px; background: linear-gradient(90deg, var(--blue), var(--violet)); transform: scaleY(.15); transform-origin: bottom; animation: microBlk 2.5s ease-in-out infinite; }
+.v-micro i:nth-child(2) { animation-delay: .25s; } .v-micro i:nth-child(3) { animation-delay: .5s; } .v-micro i:nth-child(4) { animation-delay: .75s; } .v-micro i:nth-child(5) { animation-delay: 1s; }
+@keyframes microBlk { 0%, 100% { transform: scaleY(.15); opacity: .5; } 40% { transform: scaleY(1); opacity: 1; } 70% { transform: scaleY(1); } }
+.v-stream { justify-content: flex-start; }
+.v-stream i { position: absolute; top: 50%; width: 14px; height: 14px; margin-top: -7px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 16px var(--cyan); animation: pkt 2.6s linear infinite; }
+.v-stream i:nth-child(2) { animation-delay: .43s; background: var(--blue); } .v-stream i:nth-child(3) { animation-delay: .86s; background: var(--violet); }
+.v-stream i:nth-child(4) { animation-delay: 1.3s; background: var(--magenta); } .v-stream i:nth-child(5) { animation-delay: 1.73s; } .v-stream i:nth-child(6) { animation-delay: 2.16s; background: var(--violet); }
+.tag { align-self: flex-start; font-family: var(--mono); font-size: 19px; color: var(--cyan); padding: 4px 14px; border-radius: 999px; border: 1px solid rgba(34,211,238,.4); direction: ltr; }
+.glowtag { box-shadow: 0 0 22px rgba(34,211,238,.45); }
+.history { display: flex; gap: 22px; align-items: center; justify-content: center; font-size: 24px; color: #b9c6ec; flex-wrap: wrap; }
+.history span { display: inline-flex; align-items: center; gap: 10px; }
+.history .arrow { color: var(--violet); font-size: 28px; }
+
+/* ---------- shared slide bits ---------- */
+.foot-note { font-size: 20px; color: var(--mute); padding-right: 16px; border-right: 3px solid rgba(139,92,246,.6); line-height: 1.7; flex: none; }
+.foot-note.start { margin-top: 4px; }
+.cap { padding: 18px 28px; }
+.mini li { position: relative; padding-right: 22px; font-size: 24px; color: #c3cff0; }
+.mini li::before { content: ''; position: absolute; right: 0; top: .72em; width: 9px; height: 9px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 10px var(--cyan); }
+.cap.hot .mini li::before { background: var(--magenta); box-shadow: 0 0 10px var(--magenta); }
+
+/* ---------- 05 architecture ---------- */
+.arch-layout { display: flex; gap: 28px; flex: 1; min-height: 0; align-items: flex-start; }
+.arch-frame { flex: 1; min-width: 0; }
+.steps li { display: flex; align-items: center; gap: 14px; font-size: 25px; padding: 12px 18px; border-radius: 14px; color: #8f9cc0; border: 1px solid transparent; transition: all .35s; line-height: 1.55; }
+.arch-steps { flex: 0 0 450px; display: flex; flex-direction: column; gap: 8px; counter-reset: st; }
+.arch-steps li { counter-increment: st; }
+.arch-steps li::before { content: counter(st, persian); flex: none; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; border: 1.5px solid var(--line); font-size: 22px; }
+.arch-steps li.on, .hsteps li.on { color: var(--ink); background: rgba(34,211,238,.09); border-color: rgba(34,211,238,.45); box-shadow: 0 0 30px -8px rgba(34,211,238,.6); }
+.arch-steps li.on::before { background: var(--cyan); color: #021018; border-color: var(--cyan); }
+.hsteps { display: flex; gap: 12px; justify-content: space-between; }
+.hsteps li { flex: 1; justify-content: center; text-align: center; font-size: 24px; border-color: var(--line); padding: 12px 10px; }
+.hsteps li i { font-style: normal; width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; border: 1.5px solid var(--line); font-weight: 800; flex: none; }
+.hsteps li.on i { background: var(--cyan); color: #021018; border-color: var(--cyan); }
+.hsteps li.bad.on { background: rgba(251,113,133,.1); border-color: rgba(251,113,133,.6); box-shadow: 0 0 30px -8px rgba(251,113,133,.7); }
+.hsteps li.bad.on i { background: var(--red); border-color: var(--red); }
+
+/* ---------- 06 how it works ---------- */
+.how-bottom { display: flex; gap: 24px; align-items: stretch; flex: 1; min-height: 0; }
+.code { flex: 1.25; padding: 0; overflow: hidden; }
+.code-bar { display: flex; align-items: center; gap: 8px; padding: 12px 18px; border-bottom: 1px solid var(--line); font-family: var(--mono); font-size: 18px; color: var(--mute); }
+.code-bar i { width: 12px; height: 12px; border-radius: 50%; background: #ff5f57; } .code-bar i:nth-child(2) { background: #febc2e; } .code-bar i:nth-child(3) { background: #28c840; }
+.code-bar span { margin-left: 10px; }
+.code pre { padding: 16px 22px; font-family: var(--mono); font-size: 20px; line-height: 1.7; color: #d5def7; text-align: left; white-space: pre; overflow: hidden; }
+.code .k { color: var(--cyan); } .code .f { color: #a5b4fc; } .code .s { color: #6ee7b7; } .code .n { color: var(--amber); } .code .c { color: #5b6a93; font-style: italic; }
+.how-legend { flex: 1; display: flex; flex-direction: column; gap: 10px; justify-content: center; }
+.lg { display: grid; grid-template-columns: 22px auto 1fr; gap: 6px 12px; align-items: baseline; font-size: 23px; }
+.lg b { white-space: nowrap; font-family: 'Inter', var(--font); }
+.lg span { color: var(--mute); font-size: 20px; }
+.dot { width: 14px; height: 14px; border-radius: 50%; display: inline-block; align-self: center; }
+.c1 { background: var(--cyan); box-shadow: 0 0 12px var(--cyan); } .c2 { background: var(--violet); box-shadow: 0 0 12px var(--violet); }
+.c3 { background: var(--amber); box-shadow: 0 0 12px var(--amber); } .c4 { background: var(--green); box-shadow: 0 0 12px var(--green); }
+
+/* ---------- 07 / 08 / 13 side layouts ---------- */
+.dist-layout { display: flex; gap: 26px; align-items: flex-start; flex: 1; min-height: 0; }
+.dist-layout .demo-frame { flex: 1; min-width: 0; }
+.dist-side { flex: 0 0 510px; display: flex; flex-direction: column; gap: 16px; }
+.dist-side .card { padding: 18px 24px; }
+.dist-side .card h4 { font-size: 27px; margin-bottom: 6px; }
+.seg { display: inline-flex; gap: 8px; margin: 4px 0 10px; }
+.seg button { font-family: var(--mono); font-size: 24px; width: 66px; height: 48px; border-radius: 12px; cursor: pointer; color: var(--ink); background: rgba(15,22,52,.8); border: 1px solid var(--line); transition: all .25s; }
+.seg button:hover { border-color: var(--cyan); }
+.seg button.on { background: linear-gradient(135deg, var(--blue), var(--violet)); border-color: transparent; box-shadow: 0 0 24px -4px rgba(139,92,246,.8); }
+.uc { display: flex; align-items: center; gap: 18px; padding: 16px 22px !important; }
+.uc i[data-lucide], .uc svg.lucide { width: 38px; height: 38px; margin: 0; }
+.uc h4 { margin: 0 0 2px; font-size: 26px; }
+.uc .small { font-size: 20px; }
+.uc.hot i, .uc.hot svg { color: var(--red); }
+
+/* ---------- 14 comparison ---------- */
+.cmp { display: flex; flex-direction: column; gap: 10px; flex: 1; }
+.cmp-row { display: grid; grid-template-columns: 210px repeat(3, 1fr); gap: 14px; align-items: stretch; font-size: 25px; line-height: 1.55; }
+.cmp-row > div { padding: 18px 20px; border-radius: 14px; background: rgba(14, 20, 48, .55); border: 1px solid var(--line); display: flex; align-items: center; color: #cdd7f6; }
+.cmp-row > .rl { background: transparent; border: 0; color: var(--cyan); font-weight: 700; font-size: 26px; }
+.cmp-row > div:nth-child(2) { border-color: rgba(34,211,238,.4); background: linear-gradient(160deg, rgba(34,211,238,.09), rgba(14,20,48,.55)); }
+.cmp-head > div { background: transparent; border: 0; padding: 0; }
+.cmp-head .hc { padding: 14px 18px; justify-content: center; text-align: center; font-size: 26px; display: flex; align-items: center; }
+.cmp-head .hc b { font-family: 'Inter', var(--font); font-weight: 800; }
+.cmp-row.best > div:not(.rl) { color: var(--ink); font-weight: 600; }
+
+/* ---------- 15 conclusion ---------- */
+#s-end { align-items: center; justify-content: center; text-align: center; }
+.end-wrap { position: relative; z-index: 2; display: flex; flex-direction: column; align-items: center; gap: 26px; max-width: 1500px; }
+h2.big { font-size: 66px; line-height: 1.35; }
+.take { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; width: 1640px; }
+.take li { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 22px 12px; border-radius: 20px; background: rgba(14, 20, 48, .6); border: 1px solid var(--line); text-align: center; }
+.take li i, .take li svg { width: 38px; height: 38px; }
+.take li b { font-size: 30px; font-family: 'Inter', var(--font); }
+.take li span { font-size: 21px; color: var(--mute); line-height: 1.55; }
+.thanks { margin-top: 10px; font-size: 32px; color: #cbd6f5; }
+.thanks .ltr { font-family: var(--mono); font-size: 24px; color: var(--cyan); margin-right: 14px; }
+
+/* ---------- UI chrome ---------- */
+#progress { position: fixed; top: 0; left: 0; right: 0; height: 4px; z-index: 30; background: rgba(120,150,255,.08); }
+#progress span { display: block; height: 100%; width: 0; margin-right: 0; margin-left: auto; background: var(--grad); background-size: 200% 100%; box-shadow: 0 0 16px rgba(34,211,238,.8); transition: width .5s cubic-bezier(.2,.7,.2,1); }
+#toolbar { position: fixed; z-index: 30; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; direction: rtl;
+  background: rgba(10, 16, 40, .92); border: 1px solid rgba(120,150,255,.25); box-shadow: 0 10px 40px rgba(0,0,0,.5); opacity: .72; transition: opacity .3s, transform .3s; font-family: var(--font); }
+#toolbar:hover { opacity: 1; }
+#toolbar button { width: 38px; height: 38px; display: grid; place-items: center; border: 0; background: transparent; color: var(--ink); border-radius: 50%; cursor: pointer; transition: background .2s; }
+#toolbar button:hover { background: rgba(34,211,238,.16); }
+#toolbar button i, #toolbar button svg { width: 20px; height: 20px; color: currentColor; }
+#toolbar .sep { width: 1px; height: 22px; background: var(--line); margin: 0 6px; }
+#counter, #timer { font-size: 17px; color: var(--ink); min-width: 70px; text-align: center; font-variant-numeric: tabular-nums; }
+#timer { color: var(--mute); min-width: 56px; font-family: var(--mono); font-size: 15px; }
+body.idle #toolbar { opacity: 0; transform: translate(-50%, 14px); pointer-events: none; }
+body.idle { cursor: none; }
+#overview { position: fixed; inset: 0; z-index: 40; background: rgba(2, 4, 11, .88); backdrop-filter: blur(16px); padding: 5vh 6vw; overflow: auto; direction: rtl; }
+#overview[hidden] { display: none; }
+#overview .ov-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+#overview button { text-align: right; font-family: var(--font); color: var(--ink); cursor: pointer; padding: 18px 20px; border-radius: 18px; background: rgba(14,20,48,.7); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; transition: all .25s; }
+#overview button:hover, #overview button.cur { border-color: var(--cyan); box-shadow: 0 0 30px -6px rgba(34,211,238,.6); transform: translateY(-3px); }
+#overview .n { font-family: var(--mono); color: var(--cyan); font-size: 15px; }
+#overview .t { font-size: 22px; font-weight: 700; }
+#overview h5 { margin: 0 0 18px; font-size: 22px; color: var(--mute); font-weight: 500; }
+#rotate { display: none; position: fixed; z-index: 50; inset: auto 0 70px 0; text-align: center; font-size: 15px; color: var(--amber); }
+@media (orientation: portrait) and (max-width: 800px) { #rotate { display: block; } }
+@media (prefers-reduced-motion: reduce) { .grad, #progress span, .card::before, .card::after { animation: none !important; } }
+body.blackout .reveal{opacity:0}
+
+.arch-steps li > span { flex: 1; }
+.cmp-row.cmp-head .hc { font-size: 28px; }
+
+</style>
+</head>
+<body>
+
+<canvas id="bg" aria-hidden="true"></canvas>
+<div class="vignette" aria-hidden="true"></div>
+
+<div class="reveal">
+<div class="slides">
+
+<!-- ============ 01 · OPENING ============ -->
+<section id="s-open" data-title="Apache Flink">
+  <canvas class="hero-canvas" data-demo="hero" data-w="1920" data-h="1080"></canvas>
+  <div class="open-wrap">
+    <div class="eyebrow" data-in><i data-lucide="activity"></i> TECH TALK · DATA STREAMING</div>
+    <h1 class="mega" dir="ltr" data-split><span class="grad">Apache</span> <span class="grad alt">Flink</span></h1>
+    <p class="tagline" data-in>پردازش <b>جریانی</b> و <b>حالت‌دار</b> روی داده‌هایی که هرگز تمام نمی‌شوند</p>
+    <div class="chips" data-in>
+      <span class="chip"><i data-lucide="zap"></i> Low Latency</span>
+      <span class="chip"><i data-lucide="database"></i> Stateful</span>
+      <span class="chip"><i data-lucide="shield-check"></i> Fault Tolerant</span>
+      <span class="chip"><i data-lucide="network"></i> Distributed</span>
+    </div>
+    <div class="hint" data-in>برای شروع از کلید <kbd>←</kbd> یا <kbd>Space</kbd> استفاده کنید · <kbd>F</kbd> تمام‌صفحه · <kbd>O</kbd> نمای کلی</div>
+  </div>
+</section>
+
+<!-- ============ 02 · BIG PICTURE ============ -->
+<section id="s-big" data-title="تصویر کلی">
+  <div class="slide-head">
+    <div class="eyebrow" data-in>۰۲ · تصویر کلی</div>
+    <h2 data-split><span class="ltr grad">Apache Flink</span> چیست؟</h2>
+  </div>
+  <div class="split">
+    <div class="col">
+      <p class="lead" data-in>یک <b class="grad">چارچوب توزیع‌شده</b> و موتور پردازش برای <b>محاسبات حالت‌دار روی جریان‌های داده</b> — چه نامحدود (unbounded)، چه محدود (bounded).</p>
+      <div class="problem" data-in>
+        <h3>مسئله‌ای که حل می‌کند</h3>
+        <ul class="plist">
+          <li><i data-lucide="infinity"></i><span>داده پیوسته می‌رسد و پایان ندارد</span></li>
+          <li><i data-lucide="clock"></i><span>رویدادها دیر یا بدون ترتیب می‌رسند</span></li>
+          <li><i data-lucide="database"></i><span>محاسبه به «حافظه» (state) نیاز دارد</span></li>
+          <li><i data-lucide="server-crash"></i><span>ماشین‌ها از کار می‌افتند، نتیجه باید درست بماند</span></li>
+        </ul>
+      </div>
+    </div>
+    <div class="col">
+      <div class="flow-mini" data-in>
+        <div class="fm-node"><i data-lucide="radio"></i><b>Events</b><small>unbounded stream</small></div>
+        <div class="fm-wire"><span></span><span></span><span></span></div>
+        <div class="fm-node core"><i data-lucide="cpu"></i><b class="grad">Flink</b><small>stateful computation</small></div>
+        <div class="fm-wire"><span></span><span></span><span></span></div>
+        <div class="fm-node"><i data-lucide="gauge"></i><b>Insights</b><small>results · alerts · views</small></div>
+      </div>
+      <div class="grid2">
+        <div class="card" data-in><i data-lucide="timer"></i><h4>تأخیر کم</h4><p>پردازش رویداد به‌رویداد، بدون انتظار برای پایان داده</p></div>
+        <div class="card" data-in><i data-lucide="layers"></i><h4>State داخلی</h4><p>حافظهٔ محلی و مقیاس‌پذیر کنار عملگر</p></div>
+        <div class="card" data-in><i data-lucide="clock-3"></i><h4>Event time</h4><p>معنای زمانی درست با watermark</p></div>
+        <div class="card" data-in><i data-lucide="shield-check"></i><h4>Exactly-once state</h4><p>سازگاری state با checkpoint</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 03 · EVOLUTION ============ -->
+<section id="s-evo" data-title="تکامل پردازش داده">
+  <div class="slide-head">
+    <div class="eyebrow" data-in>۰۳ · تکامل پردازش داده</div>
+    <h2 data-split>از «بعداً پردازش کن» تا «همین حالا»</h2>
+  </div>
+  <div class="evo">
+    <svg class="evo-line" viewBox="0 0 1760 40" preserveAspectRatio="none" aria-hidden="true"><path d="M1760 20 H0" /></svg>
+    <div class="evo-grid">
+      <div class="card era" data-in>
+        <div class="era-num">۱</div>
+        <h3>پردازش دسته‌ای سنتی</h3>
+        <div class="era-vis v-batch"><i></i></div>
+        <p>داده ذخیره می‌شود، سپس یک job دوره‌ای (مثلاً شبانه) آن را پردازش می‌کند.</p>
+        <span class="tag">ETL · Data Warehouse</span>
+      </div>
+      <div class="card era" data-in>
+        <div class="era-num">۲</div>
+        <h3>دسته‌های کوچک</h3>
+        <div class="era-vis v-micro"><i></i><i></i><i></i><i></i><i></i></div>
+        <p>دسته‌ها کوچک‌تر و پشت‌سرهم اجرا می‌شوند؛ تأخیر کمتر، اما همچنان مبتنی بر دسته.</p>
+        <span class="tag">Micro-batch</span>
+      </div>
+      <div class="card era hot" data-in>
+        <div class="era-num">۳</div>
+        <h3>پردازش جریانی واقعی</h3>
+        <div class="era-vis v-stream"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        <p>هر رویداد به‌محض رسیدن پردازش می‌شود و نتیجه پیوسته به‌روز می‌ماند.</p>
+        <span class="tag glowtag">Stream Processing</span>
+      </div>
+    </div>
+    <div class="history" data-in>
+      <span><i data-lucide="flask-conical"></i> Stratosphere · پروژهٔ پژوهشی (TU Berlin و همکاران)</span>
+      <span class="arrow">◂</span>
+      <span><i data-lucide="egg"></i> Apache Incubator · ۲۰۱۴</span>
+      <span class="arrow">◂</span>
+      <span><i data-lucide="award"></i> Top-Level Project · دسامبر ۲۰۱۴</span>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 04 · BATCH vs STREAM (Demo A) ============ -->
+<section id="s-bvs" data-title="Batch در برابر Stream">
+  <div class="slide-head">
+    <div class="eyebrow" data-in>۰۴ · دموی A</div>
+    <h2 data-split><span class="ltr">Batch</span> در برابر <span class="ltr grad">Stream</span></h2>
+  </div>
+  <div class="demo-frame" data-in>
+    <canvas data-demo="batchStream" data-w="1720" data-h="560"></canvas>
+  </div>
+  <div class="grid2 two-cols">
+    <div class="card cap" data-in>
+      <h4><i data-lucide="package"></i> Batch</h4>
+      <ul class="mini"><li>داده انباشته می‌شود</li><li>پردازش پس از آماده‌شدن دسته آغاز می‌شود</li><li>نتیجه یک‌جا و با تأخیر ظاهر می‌شود</li></ul>
+    </div>
+    <div class="card cap hot" data-in>
+      <h4><i data-lucide="waves"></i> Stream</h4>
+      <ul class="mini"><li>رویدادها پیوسته می‌رسند</li><li>پردازش تدریجی و رویداد‌به‌رویداد</li><li>نتیجه مدام به‌روز می‌شود</li></ul>
+    </div>
+  </div>
+  <div class="foot-note" data-in>تصویرسازی مفهومی با نرخ ورودی یکسان؛ اعداد، زمان‌بندی واقعی نیستند.</div>
+</section>
+
+<!-- ============ 05 · ARCHITECTURE ============ -->
+<section id="s-arch" data-title="معماری">
+  <div class="slide-head">
+    <div class="eyebrow" data-in>۰۵ · معماری</div>
+    <h2 data-split>معماری <span class="ltr"><span class="grad">Apache Flink</span></span></h2>
+  </div>
+  <div class="arch-layout">
+    <div class="demo-frame arch-frame" data-in dir="ltr">
+      <svg id="archSvg" viewBox="0 0 1160 620" role="img" aria-label="Flink architecture diagram"></svg>
+    </div>
+    <ol class="steps arch-steps" data-in>
+      <li data-step="0"><b>Client</b> برنامه را به JobGraph تبدیل و ارسال می‌کند</li>
+      <li data-step="1"><b>Dispatcher</b> یک <b>JobMaster</b> برای job می‌سازد</li>
+      <li data-step="2">JobMaster از <b>ResourceManager</b> slot می‌خواهد</li>
+      <li data-step="3"><b>ResourceManager</b> از <b>TaskManager</b>ها می‌خواهد slotها را به JobMaster عرضه کنند</li>
+      <li data-step="4">JobMaster وظایف (tasks) را در slotها مستقر (deploy) می‌کند</li>
+      <li data-step="5">TaskManagerها داده را مستقیم مبادله و heartbeat می‌فرستند</li>
+    </ol>
+  </div>
+  <div class="foot-note" data-in>اجرا روی Standalone، Kubernetes یا YARN امکان‌پذیر است.</div>
+</section>
+
+<!-- ============ 06 · HOW FLINK WORKS ============ -->
+<section id="s-how" data-title="Flink چگونه کار می‌کند">
+  <div class="slide-head">
+    <div class="eyebrow" data-in>۰۶ · مدل اجرا</div>
+    <h2 data-split dir="ltr">Source → Transformation → <span class="grad">Sink</span></h2>
+  </div>
+  <div class="demo-frame" data-in>
+    <canvas data-demo="pipeline" data-w="1720" data-h="440"></canvas>
+  </div>
+  <div class="how-bottom">
+    <div class="card code" data-in dir="ltr">
+      <div class="code-bar"><i></i><i></i><i></i><span>DataStream API (simplified)</span></div>
+<pre><code><span class="k">env</span>.<span class="f">fromSource</span>(kafkaSource, watermarkStrategy, <span class="s">"orders"</span>)
+   .<span class="f">map</span>(parse)                  <span class="c">// transformation</span>
+   .<span class="f">filter</span>(e -&gt; e.amount &gt; <span class="n">0</span>)
+   .<span class="f">keyBy</span>(e -&gt; e.userId)         <span class="c">// repartition by key</span>
+   .<span class="f">window</span>(TumblingEventTimeWindows.<span class="f">of</span>(<span class="k">Duration</span>.<span class="f">ofMinutes</span>(<span class="n">1</span>)))
+   .<span class="f">sum</span>(<span class="s">"amount"</span>)
+   .<span class="f">sinkTo</span>(sink);</code></pre>
+    </div>
+    <div class="how-legend" data-in>
+      <div class="lg"><i class="dot c1"></i><b>Source</b><span>ورود داده از Kafka، فایل و …</span></div>
+      <div class="lg"><i class="dot c2"></i><b>Transformation</b><span>map، filter، keyBy، window</span></div>
+      <div class="lg"><i class="dot c3"></i><b>Operator chain</b><span>عملگرهای پشت‌سرهم در یک task ادغام می‌شوند؛ keyBy زنجیره را می‌شکند</span></div>
+      <div class="lg"><i class="dot c4"></i><b>Sink</b><span>خروجی به Kafka، پایگاه داده و …</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 07 · DISTRIBUTED (Demo B) ============ -->
+<section id="s-dist" data-title="پردازش توزیع‌شده">
+  <div class="slide-head">
+    <div class="eyebrow" data-in>۰۷ · دموی B</div>
+    <h2 data-split><span class="ltr grad">Distributed Computing</span> با Parallelism</h2>
+  </div>
+  <div class="dist-layout">
+    <div class="dist-side">
+      <div class="card" data-in>
+        <h4><i data-lucide="sliders-horizontal"></i> Parallelism</h4>
+        <div class="seg" id="parSeg" dir="ltr">
+          <button data-par="1">1</button><button data-par="2">2</button><button data-par="4" class="on">4</button>
+        </div>
+        <p class="small">هر عملگر به چند <b>subtask</b> موازی تقسیم می‌شود؛ هر کلید همیشه به یک subtask می‌رود.</p>
+      </div>
+      <div class="card" data-in>
+        <h4><i data-lucide="crown"></i> JobManager</h4>
+        <p class="small">هماهنگ‌کنندهٔ job: زمان‌بندی، checkpoint و بازیابی.</p>
+      </div>
+      <div class="card" data-in>
+        <h4><i data-lucide="boxes"></i> TaskManager</h4>
+        <p class="small">وظایف را در <b>task slot</b>ها اجرا و داده را بین خود مبادله می‌کند.</p>
+      </div>
+      <div class="foot-note start" data-in>در Flink واقعی، تغییر parallelism یک job در حال اجرا معمولاً با savepoint و راه‌اندازی مجدد (یا scheduler تطبیقی) انجام می‌شود.</div>
+    </div>
+    <div class="demo-frame" data-in>
+      <canvas data-demo="distributed" data-w="1160" data-h="640"></canvas>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 08 · STATE ============ -->
+<section id="s-state" data-title="State">
+  <div class="slide-head">
+    <div class="eyebrow" data-in>۰۸ · حافظه</div>
+    <h2 data-split><span class="ltr grad">Stateful Processing</span> چرا مهم است؟</h2>
+  </div>
+  <div class="dist-layout">
+    <div class="demo-frame" data-in>
+      <canvas data-demo="state" data-w="1160" data-h="630"></canvas>
+    </div>
+    <div class="dist-side">
+      <div class="card" data-in>
+        <h4><i data-lucide="brain"></i> State چیست؟</h4>
+        <p class="small">اطلاعاتی که عملگر از رویدادهای گذشته نگه می‌دارد: شمارنده، پنجره، نشست، الگوی در حال شکل‌گیری.</p>
+      </div>
+      <div class="card" data-in>
+        <h4><i data-lucide="key-round"></i> Keyed State</h4>
+        <p class="small"><code>ValueState</code> · <code>ListState</code> · <code>MapState</code> — بر اساس کلید پارتیشن می‌شود و محلی خوانده می‌شود.</p>
+      </div>
+      <div class="card" data-in>
+        <h4><i data-lucide="hard-drive"></i> State Backend</h4>
+        <p class="small"><code>HashMapStateBackend</code> (heap) یا <code>EmbeddedRocksDBStateBackend</code> (دیسک محلی) برای stateهای بزرگ.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 09 · EVENT vs PROCESSING TIME ============ -->
+<section id="s-time" data-title="Event time">
+  <div class="slide-head">
+    <div class="eyebrow" data-in>۰۹ · معنای زمان</div>
+    <h2 data-split><span class="ltr grad">Event Time</span> در برابر Processing Time</h2>
+  </div>
+  <div class="demo-frame" data-in>
+    <canvas data-demo="time" data-w="1720" data-h="580"></canvas>
+  </div>
+  <div class="grid2 two-cols">
+    <div class="card cap" data-in>
+      <h4><i data-lucide="calendar-clock"></i> Event Time</h4>
+      <p class="small">زمانی که رویداد <b>واقعاً رخ داده</b> و درون خود رکورد است. نتیجه با پردازش مجدد یکسان می‌ماند.</p>
+    </div>
+    <div class="card cap hot" data-in>
+      <h4><i data-lucide="cpu"></i> Processing Time</h4>
+      <p class="small">ساعت ماشینی که رویداد را <b>پردازش می‌کند</b>. ساده و سریع، اما به تأخیر شبکه و بار سیستم حساس است.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 10 · WINDOWS & WATERMARKS ============ -->
+<section id="s-wm" data-title="Window و Watermark">
+  <div class="slide-head">
+    <div class="eyebrow" data-in>۱۰ · پنجره‌ها</div>
+    <h2 data-split><span class="grad">Windows</span> و Watermarks</h2>
+  </div>
+  <div class="demo-frame" data-in>
+    <canvas data-demo="watermark" data-w="1720" data-h="560"></canvas>
+  </div>
+  <div class="grid3">
+    <div class="card cap" data-in><h4><i data-lucide="square-split-horizontal"></i> Tumbling Window</h4><p class="small">بازه‌های ثابت و بدون همپوشانی روی event time.</p></div>
+    <div class="card cap hot" data-in><h4><i data-lucide="flag"></i> Watermark</h4><p class="small">ادعای پیشرفت event time: «رویداد جدیدی با زمان ≤ W انتظار نمی‌رود».</p></div>
+    <div class="card cap" data-in><h4><i data-lucide="hourglass"></i> Late Events</h4><p class="small">پس از بسته‌شدن پنجره: <code>allowedLateness</code> یا <code>side output</code>.</p></div>
+  </div>
+</section>
+
+<!-- ============ 11 · FAULT TOLERANCE (Demo C) ============ -->
+<section id="s-ft" data-title="تحمل خطا">
+  <div class="slide-head">
+    <div class="eyebrow" data-in>۱۱ · دموی C</div>
+    <h2 data-split><span class="ltr grad">Fault Tolerance</span> با Checkpoint</h2>
+  </div>
+  <div class="demo-frame" data-in>
+    <canvas data-demo="fault" data-w="1720" data-h="520"></canvas>
+  </div>
+  <ol class="steps hsteps" id="ftSteps" data-in>
+    <li data-s="1"><i>۱</i>اجرای عادی</li>
+    <li data-s="2"><i>۲</i>ساخت checkpoint</li>
+    <li data-s="3"><i>۳</i>خرابی عملگر</li>
+    <li data-s="4"><i>۴</i>بازیابی از آخرین checkpoint</li>
+    <li data-s="5"><i>۵</i>ادامهٔ پردازش</li>
+  </ol>
+  <div class="foot-note" data-in>Barrierهای checkpoint در میان رکوردها جریان می‌یابند و یک snapshot سازگار از state و offset منبع می‌سازند (asynchronous barrier snapshotting). Exactly-once انتها‌به‌انتها به sink تراکنشی یا idempotent نیاز دارد.</div>
+</section>
+
+<!-- ============ 12 · KAFKA + FLINK ============ -->
+<section id="s-kafka" data-title="Kafka + Flink">
+  <div class="slide-head">
+    <div class="eyebrow" data-in>۱۲ · خط لولهٔ واقعی</div>
+    <h2 data-split class="latin-head">Apache <span class="grad">Kafka</span> + Flink</h2>
+  </div>
+  <div class="demo-frame" data-in>
+    <canvas data-demo="kafka" data-w="1720" data-h="560"></canvas>
+  </div>
+  <div class="grid3">
+    <div class="card cap" data-in><h4><i data-lucide="database-zap"></i> Kafka</h4><p class="small">لاگ توزیع‌شده و پایدار از رویدادها، تقسیم‌شده به partition.</p></div>
+    <div class="card cap hot" data-in><h4><i data-lucide="git-merge"></i> Flink Source</h4><p class="small">هر subtask یک یا چند partition می‌خواند؛ offsetها داخل checkpoint ذخیره می‌شوند.</p></div>
+    <div class="card cap" data-in><h4><i data-lucide="send"></i> Kafka Sink</h4><p class="small">با <code>EXACTLY_ONCE</code> و تراکنش‌های Kafka، خروجی بدون تکرار قابل‌ارائه است.</p></div>
+  </div>
+</section>
+
+<!-- ============ 13 · USE CASES (Demo D) ============ -->
+<section id="s-use" data-title="موارد استفاده">
+  <div class="slide-head">
+    <div class="eyebrow" data-in>۱۳ · دموی D</div>
+    <h2 data-split>کاربردهای واقعی؛ <span class="grad">تشخیص تقلب</span></h2>
+  </div>
+  <div class="dist-layout">
+    <div class="demo-frame" data-in>
+      <canvas data-demo="fraud" data-w="1160" data-h="640"></canvas>
+    </div>
+    <div class="dist-side usecases">
+      <div class="card uc hot" data-in><i data-lucide="shield-alert"></i><div><h4>Fraud Detection</h4><p class="small">الگوهای مشکوک روی تراکنش‌ها، لحظه‌ای</p></div></div>
+      <div class="card uc" data-in><i data-lucide="line-chart"></i><div><h4>Financial Analytics</h4><p class="small">تجمیع و ریسک پیوسته</p></div></div>
+      <div class="card uc" data-in><i data-lucide="activity"></i><div><h4>Monitoring</h4><p class="small">لاگ و متریک، هشدار بلادرنگ</p></div></div>
+      <div class="card uc" data-in><i data-lucide="cpu"></i><div><h4>IoT</h4><p class="small">جریان سنسورها و رویدادهای دستگاه</p></div></div>
+      <div class="foot-note start" data-in>داده‌های دمو شبیه‌سازی‌شده‌اند.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 14 · COMPARISON ============ -->
+<section id="s-cmp" data-title="مقایسه">
+  <div class="slide-head">
+    <div class="eyebrow" data-in>۱۴ · مقایسهٔ منصفانه</div>
+    <h2 data-split><span class="ltr grad">Flink</span> در کنار Spark و Kafka Streams</h2>
+  </div>
+  <div class="cmp">
+    <div class="cmp-row cmp-head" data-in>
+      <div></div>
+      <div class="card hc"><b class="grad">Apache Flink</b></div>
+      <div class="card hc"><b>Spark Structured Streaming</b></div>
+      <div class="card hc"><b>Kafka Streams</b></div>
+    </div>
+    <div class="cmp-row" data-in><div class="rl" dir="rtl">مدل پردازش</div><div>Native streaming · رویداد‌به‌رویداد</div><div>Micro-batch (پیش‌فرض) · حالت continuous آزمایشی</div><div>Native streaming · رکورد‌به‌رکورد</div></div>
+    <div class="cmp-row" data-in><div class="rl" dir="rtl">شکل استقرار</div><div>خوشهٔ مستقل (K8s، YARN، Standalone)</div><div>خوشهٔ Spark</div><div>کتابخانه داخل اپلیکیشن JVM</div></div>
+    <div class="cmp-row" data-in><div class="rl" dir="rtl">State</div><div>Keyed/Operator state · RocksDB · checkpoint</div><div>State store · checkpoint</div><div>State store محلی + changelog topic</div></div>
+    <div class="cmp-row" data-in><div class="rl" dir="rtl">زمان و Watermark</div><div>Event time و watermark کامل</div><div>Event time و watermark</div><div>Event time با زمان‌بندی مبتنی بر stream-time</div></div>
+    <div class="cmp-row" data-in><div class="rl" dir="rtl">منابع داده</div><div>کانکتورهای متنوع</div><div>کانکتورهای متنوع</div><div>مرکزیت Kafka (بقیه از طریق Kafka Connect)</div></div>
+    <div class="cmp-row best" data-in><div class="rl" dir="rtl">مناسب برای</div><div>پردازش حالت‌دار پیچیده و تأخیر کم</div><div>اکوسیستم یکپارچهٔ batch + stream + ML</div><div>میکروسرویس‌های Kafka‌محور و سبک</div></div>
+  </div>
+  <div class="foot-note" data-in>انتخاب را با نیازمندی‌ها بسنجید، نه با تبلیغات؛ هر سه ابزار در جای درست خود عالی‌اند.</div>
+</section>
+
+<!-- ============ 15 · CONCLUSION ============ -->
+<section id="s-end" data-title="جمع‌بندی">
+  <canvas class="hero-canvas dim" data-demo="finale" data-w="1920" data-h="1080"></canvas>
+  <div class="end-wrap">
+    <div class="eyebrow" data-in>۱۵ · جمع‌بندی</div>
+    <h2 class="big" data-split>داده جریان دارد؛ <span class="grad">Flink</span> آن را درست و به‌موقع می‌فهمد</h2>
+    <ul class="take">
+      <li data-in><i data-lucide="waves"></i><b>Stream-first</b><span>جریان نامحدود، شهروند درجه یک است</span></li>
+      <li data-in><i data-lucide="database"></i><b>State</b><span>حافظهٔ محلی و مقیاس‌پذیر کنار عملگر</span></li>
+      <li data-in><i data-lucide="clock-3"></i><b>Event time</b><span>زمان واقعی با watermark</span></li>
+      <li data-in><i data-lucide="shield-check"></i><b>Checkpoints</b><span>بازیابی سازگار پس از خرابی</span></li>
+      <li data-in><i data-lucide="network"></i><b>Scale-out</b><span>موازی‌سازی روی خوشه</span></li>
+    </ul>
+    <div class="thanks" data-in>سپاس از توجه شما <span class="ltr">· flink.apache.org</span></div>
+  </div>
+</section>
+
+</div>
+</div>
+
+<!-- ============ UI CHROME ============ -->
+<div id="progress" aria-hidden="true"><span></span></div>
+<div id="toolbar" role="toolbar" aria-label="کنترل ارائه">
+  <button id="btnNext" title="اسلاید بعد (←)"><i data-lucide="chevron-right"></i></button>
+  <span id="counter" aria-live="polite">۱ / ۱۵</span>
+  <button id="btnPrev" title="اسلاید قبل (→)"><i data-lucide="chevron-left"></i></button>
+  <i class="sep"></i>
+  <button id="btnOverview" title="نمای کلی (O)"><i data-lucide="layout-grid"></i></button>
+  <button id="btnRestart" title="اجرای مجدد انیمیشن (R)"><i data-lucide="rotate-ccw"></i></button>
+  <button id="btnPause" title="توقف/ادامهٔ انیمیشن (P)"><i data-lucide="pause"></i></button>
+  <button id="btnFull" title="تمام‌صفحه (F)"><i data-lucide="maximize"></i></button>
+  <span id="timer" title="زمان ارائه">۰۰:۰۰</span>
+</div>
+<div id="overview" hidden></div>
+<div id="rotate">برای تجربهٔ بهتر، دستگاه را بچرخانید ↻</div>
+
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5/dist/reveal.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3/dist/gsap.min.js"></script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<script>
+/* ==========================================================
+   mini-reveal.js — tiny offline fallback for Reveal.js.
+   Only activates when the real Reveal.js (CDN) did not load.
+   Implements the small subset of the Reveal API used by main.js.
+   ========================================================== */
+(function (g) {
+  'use strict';
+  if (g.Reveal) return;
+
+  document.documentElement.classList.add('no-reveal');
+  const L = {};
+  let slides = [], idx = 0, cfg = {}, stage, scale = 1, ready = false, touchX = null;
+
+  const R = {
+    isMini: true,
+    on(n, f) { (L[n] = L[n] || []).push(f); },
+    emit(n, d) { (L[n] || []).forEach(f => f(d)); },
+    getScale: () => scale,
+    getTotalSlides: () => slides.length,
+    getIndices: () => ({ h: idx, v: 0 }),
+    getCurrentSlide: () => slides[idx],
+    getSlides: () => slides.slice(),
+    getProgress: () => (slides.length > 1 ? idx / (slides.length - 1) : 0),
+    isFirstSlide: () => idx === 0,
+    isLastSlide: () => idx === slides.length - 1,
+    next() { R.slide(idx + 1); },
+    prev() { R.slide(idx - 1); },
+    layout() {
+      scale = Math.min(innerWidth / cfg.width, innerHeight / cfg.height);
+      scale = Math.max(cfg.minScale || .1, Math.min(cfg.maxScale || 3, scale * (1 - (cfg.margin || 0))));
+      stage.style.transform = 'translate(' + (-cfg.width / 2 * scale) + 'px,' + (-cfg.height / 2 * scale) + 'px) scale(' + scale + ')';
+      R.emit('resize', { scale });
+    },
+    slide(n, silent) {
+      n = Math.max(0, Math.min(slides.length - 1, n));
+      if (ready && n === idx && !silent) return;
+      const prev = slides[idx], cur = slides[n];
+      if (prev && prev !== cur) {
+        prev.classList.remove('present', 'show'); prev.classList.add('leaving');
+        setTimeout(() => prev.classList.remove('leaving'), 720);
+      }
+      idx = n;
+      cur.classList.remove('leaving'); cur.classList.add('present');
+      requestAnimationFrame(() => requestAnimationFrame(() => cur.classList.add('show')));
+      if (cfg.hash) { try { history.replaceState(null, '', '#/' + idx); } catch (e) { location.hash = '#/' + idx; } }
+      if (ready) R.emit('slidechanged', { previousSlide: prev, currentSlide: cur, indexh: idx, indexv: 0 });
+    },
+    initialize(c) {
+      cfg = Object.assign({ width: 1920, height: 1080, margin: 0, minScale: .1, maxScale: 3, hash: true, rtl: false }, c);
+      const root = document.querySelector('.reveal');
+      stage = root.querySelector('.slides');
+      slides = Array.from(stage.children).filter(e => e.tagName === 'SECTION');
+      R.layout();
+      addEventListener('resize', R.layout);
+      const nextK = cfg.rtl ? 'ArrowLeft' : 'ArrowRight', prevK = cfg.rtl ? 'ArrowRight' : 'ArrowLeft';
+      addEventListener('keydown', e => {
+        if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return;
+        const k = e.key;
+        if (k === nextK || k === 'ArrowDown' || k === 'PageDown' || k === ' ' || k === 'n' || k === 'N') { e.preventDefault(); R.next(); }
+        else if (k === prevK || k === 'ArrowUp' || k === 'PageUp' || k === 'p' || k === 'P') { e.preventDefault(); R.prev(); }
+        else if (k === 'Home') R.slide(0);
+        else if (k === 'End') R.slide(slides.length - 1);
+      });
+      root.addEventListener('touchstart', e => { touchX = e.touches[0].clientX; }, { passive: true });
+      root.addEventListener('touchend', e => {
+        if (touchX == null) return;
+        const dx = e.changedTouches[0].clientX - touchX; touchX = null;
+        if (Math.abs(dx) < 50) return;
+        ((dx < 0) !== !!cfg.rtl) ? R.next() : R.prev();
+      }, { passive: true });
+      const m = /#\/(\d+)/.exec(location.hash);
+      R.slide(m ? +m[1] : 0, true);
+      ready = true;
+      R.emit('ready', { currentSlide: slides[idx], indexh: idx });
+      return Promise.resolve();
+    }
+  };
+  g.Reveal = R;
+})(window);
+
+</script>
+<script>
+/* ==========================================================
+   background.js — ambient particle / network layer (#bg)
+   Lightweight: ~70 particles, O(n²) links with distance cut-off,
+   DPR capped at 1.5, pauses when tab hidden or presentation paused.
+   ========================================================== */
+(function (g) {
+  'use strict';
+  const cv = document.getElementById('bg');
+  if (!cv) return;
+  const c = cv.getContext('2d');
+  const COLORS = ['34,211,238', '59,130,246', '139,92,246', '232,121,249'];
+  let W = 0, H = 0, dpr = 1, P = [], run = true, last = 0, mx = 0, my = 0, tx = 0, ty = 0;
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function size() {
+    dpr = 1;
+    W = innerWidth; H = innerHeight;
+    cv.width = W * dpr; cv.height = H * dpr;
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const n = Math.round(Math.min(48, Math.max(24, (W * H) / 40000)));
+    P = Array.from({ length: n }, (_, i) => ({
+      x: Math.random() * W, y: Math.random() * H,
+      vx: (Math.random() - .35) * .22, vy: (Math.random() - .5) * .12,
+      r: Math.random() * 1.6 + .5, z: Math.random() * .8 + .2, col: COLORS[i % 4]
+    }));
+  }
+
+  function frame(ts) {
+    requestAnimationFrame(frame);
+    if (!run || document.hidden) return;
+    if (ts - last < 33) return; // ~30 fps is plenty for an ambient layer
+    const dt = Math.min(66, ts - last || 33); last = ts;
+    c.clearRect(0, 0, W, H);
+    tx += (mx - tx) * .05; ty += (my - ty) * .05;
+    const LINK = Math.min(170, W * .13);
+    for (const p of P) {
+      p.x += p.vx * dt * .06 * 16 * p.z; p.y += p.vy * dt * .06 * 16 * p.z;
+      if (p.x > W + 20) p.x = -20; if (p.x < -20) p.x = W + 20;
+      if (p.y > H + 20) p.y = -20; if (p.y < -20) p.y = H + 20;
+    }
+    c.lineWidth = 1;
+    for (let i = 0; i < P.length; i++) {
+      const a = P[i], ax = a.x + tx * 18 * a.z, ay = a.y + ty * 18 * a.z;
+      for (let j = i + 1; j < P.length; j++) {
+        const b = P[j], bx = b.x + tx * 18 * b.z, by = b.y + ty * 18 * b.z;
+        const dx = ax - bx, dy = ay - by, d2 = dx * dx + dy * dy;
+        if (d2 < LINK * LINK) {
+          const al = (1 - Math.sqrt(d2) / LINK) * .22;
+          c.strokeStyle = 'rgba(' + a.col + ',' + al + ')';
+          c.beginPath(); c.moveTo(ax, ay); c.lineTo(bx, by); c.stroke();
+        }
+      }
+      c.fillStyle = 'rgba(' + a.col + ',' + (.35 + a.z * .45) + ')';
+      c.beginPath(); c.arc(ax, ay, a.r * a.z + .3, 0, 6.2832); c.fill();
+    }
+  }
+
+  addEventListener('resize', size);
+  addEventListener('pointermove', e => { mx = e.clientX / W - .5; my = e.clientY / H - .5; }, { passive: true });
+  size();
+  if (reduce) { run = false; frame(0); } else requestAnimationFrame(frame);
+  g.FlinkBG = { pause() { run = false; }, resume() { run = true; } };
+})(window);
+
+</script>
+<script>
+/* ==========================================================
+   arch.js — animated SVG architecture diagram (slide 05)
+   Builds the SVG once, then cycles through 6 steps; a packet
+   travels along each active connection.
+   ========================================================== */
+(function (g) {
+  'use strict';
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.getElementById('archSvg');
+  if (!svg) return;
+  const el = (n, a, p) => { const e = document.createElementNS(NS, n); for (const k in a) e.setAttribute(k, a[k]); (p || svg).appendChild(e); return e; };
+  const txt = (s, x, y, o = {}) => { const t = el('text', { x, y, 'text-anchor': o.a || 'middle', fill: o.c || '#e8eefc', 'font-size': o.s || 20, 'font-weight': o.w || 600, 'font-family': o.mono ? 'JetBrains Mono, monospace' : 'Inter, Vazirmatn, sans-serif', 'dominant-baseline': 'middle' }, o.p); t.textContent = s; return t; };
+
+  const defs = el('defs', {});
+  defs.innerHTML = '<linearGradient id="ag" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient>' +
+    '<filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>';
+
+  const nodes = {};
+  function node(id, x, y, w, h, title, sub, col, rx = 16) {
+    const gg = el('g', { class: 'an', id: 'an-' + id });
+    const r = el('rect', { x, y, width: w, height: h, rx, fill: 'rgba(12,18,44,.9)', stroke: col, 'stroke-width': 1.6, 'stroke-opacity': .55 }, gg);
+    txt(title, x + w / 2, y + (sub ? h * .38 : h / 2), { s: title.length > 14 ? 18 : 21, w: 700, p: gg });
+    if (sub) txt(sub, x + w / 2, y + h * .72, { s: 14, c: '#8f9cc0', w: 400, p: gg });
+    nodes[id] = { r, col, cx: x + w / 2, cy: y + h / 2, x, y, w, h };
+    return gg;
+  }
+
+  // cluster frame + JobManager group
+  el('rect', { x: 250, y: 14, width: 896, height: 592, rx: 26, fill: 'none', stroke: '#3b82f6', 'stroke-opacity': .35, 'stroke-dasharray': '8 8', 'stroke-width': 1.5 });
+  txt('Flink Cluster', 270, 34, { a: 'start', s: 16, c: '#6b7aa8', mono: true });
+  el('rect', { x: 280, y: 52, width: 836, height: 170, rx: 20, fill: 'rgba(59,130,246,.06)', stroke: '#3b82f6', 'stroke-opacity': .4 });
+  txt('JobManager', 304, 76, { a: 'start', s: 18, c: '#7ea6ff', w: 700 });
+
+  node('client', 20, 90, 190, 110, 'Client', 'DataStream / SQL → JobGraph', '#22d3ee');
+  node('disp', 304, 108, 190, 92, 'Dispatcher', 'REST · starts JobMaster', '#3b82f6');
+  node('jm', 585, 108, 190, 92, 'JobMaster', 'scheduling · checkpoints', '#8b5cf6');
+  node('rm', 876, 108, 190, 92, 'ResourceManager', 'slot allocation', '#e879f9');
+
+  const tmX = [290, 580, 870];
+  tmX.forEach((x, i) => {
+    el('rect', { x, y: 338, width: 250, height: 232, rx: 20, fill: 'rgba(34,211,238,.04)', stroke: '#22d3ee', 'stroke-opacity': .35 });
+    txt('TaskManager ' + (i + 1), x + 18, 362, { a: 'start', s: 18, c: '#67e8f9', w: 700 });
+    for (let s = 0; s < 2; s++) {
+      node('tm' + i + 's' + s, x + 16 + s * 116, 388, 102, 150, 'slot ' + (s + 1), ['source→map', 'keyBy→win', 'window', 'sink', 'source→map', 'window'][i * 2 + s], '#22d3ee', 12);
+      const n = nodes['tm' + i + 's' + s];
+      el('rect', { x: n.x + 14, y: n.y + 122, width: n.w - 28, height: 10, rx: 5, fill: 'rgba(120,150,255,.2)' });
+    }
+    nodes['tm' + i] = { cx: x + 125, cy: 338, x, y: 338, w: 250, h: 232 };
+  });
+
+  node('store', 20, 400, 190, 100, 'Checkpoints', 'durable storage · S3 · HDFS', '#34d399');
+  txt('RPC / control', 700, 252, { s: 13, c: '#5b6a93', w: 400 });
+
+  // connections (id, polyline points, color, dashed?)
+  const conns = [
+    ['c0', [[210, 145], [304, 150]], '#22d3ee'],            // client -> dispatcher
+    ['c1', [[494, 154], [585, 154]], '#3b82f6'],            // dispatcher -> jobmaster
+    ['c2', [[775, 154], [876, 154]], '#8b5cf6'],            // jobmaster -> rm (request slots)
+    ['c3', [[971, 200], [971, 270], [415, 270], [415, 338]], '#e879f9'], // rm -> TM1 (instruct offer)
+    ['c4', [[680, 200], [680, 338]], '#8b5cf6'],            // jobmaster -> TM2 (deploy)
+    ['c5', [[540, 450], [580, 450]], '#22d3ee']             // data exchange
+  ];
+  const paths = conns.map(([id, pts, col]) => {
+    const d = pts.map((p, i) => (i ? 'L' : 'M') + p[0] + ' ' + p[1]).join(' ');
+    el('path', { d, fill: 'none', stroke: col, 'stroke-opacity': .22, 'stroke-width': 3, 'stroke-linejoin': 'round' });
+    const p = el('path', { d, fill: 'none', stroke: col, 'stroke-width': 3, 'stroke-linejoin': 'round', 'stroke-dasharray': '10 10', class: 'flow', opacity: 0, filter: 'url(#glow)' });
+    return { id, p, len: p.getTotalLength(), col };
+  });
+  // static support lines
+  const extra = [
+    'M415 338 L415 300 L680 300', 'M680 300 L680 338', 'M680 300 L995 300 L995 338', // deploy to all TMs
+    'M290 450 L210 450', // TM1 -> storage
+    'M830 450 L870 450'  // TM2 <-> TM3
+  ];
+  extra.forEach(d => el('path', { d, fill: 'none', stroke: '#5b6a93', 'stroke-opacity': .35, 'stroke-width': 2, 'stroke-dasharray': '4 6' }));
+  txt('checkpoints', 250, 432, { s: 12, c: '#34d399', w: 400 });
+  txt('shuffle', 560, 436, { s: 12, c: '#22d3ee', w: 400 });
+
+  // moving packet
+  const pk = el('circle', { r: 8, fill: '#fff', filter: 'url(#glow)', opacity: 0 });
+  const STEPS = [[0], [1], [2], [3], [4], [5]];
+  const DUR = 2.1;
+  let raf = 0, t0 = 0, step = -1, listEls = [], on = false, paused = false, acc = 0, lastTs = 0;
+
+  function setStep(i) {
+    step = i;
+    paths.forEach((p, k) => { p.p.setAttribute('opacity', STEPS[i].includes(k) ? 1 : 0); });
+    Object.values(nodes).forEach(n => n.r && n.r.setAttribute('stroke-opacity', .55));
+    const hot = { 0: ['client', 'disp'], 1: ['disp', 'jm'], 2: ['jm', 'rm'], 3: ['rm', 'tm0s0'], 4: ['jm', 'tm1s0', 'tm1s1'], 5: ['tm0s0', 'tm0s1', 'tm1s0', 'tm1s1'] }[i] || [];
+    hot.forEach(id => nodes[id] && nodes[id].r && (nodes[id].r.setAttribute('stroke-opacity', 1), nodes[id].r.setAttribute('stroke-width', 2.4)));
+    Object.keys(nodes).forEach(id => { if (!hot.includes(id) && nodes[id].r) nodes[id].r.setAttribute('stroke-width', 1.6); });
+    listEls.forEach((li, k) => li.classList.toggle('on', k === i));
+  }
+
+  function tick(ts) {
+    if (!on) return;
+    raf = requestAnimationFrame(tick);
+    const dt = Math.max(0, Math.min(.05, (ts - lastTs) / 1000 || 0)); lastTs = ts;
+    if (!paused) acc += dt;
+    const i = ((Math.floor(acc / DUR) % STEPS.length) + STEPS.length) % STEPS.length;
+    if (i !== step) setStep(i);
+    const u = (acc % DUR) / DUR;
+    const cur = paths[STEPS[i][0]];
+    if (i === 5) { // bidirectional shuffle: bounce
+      const q = u < .5 ? u * 2 : 2 - u * 2, pt = cur.p.getPointAtLength(q * cur.len);
+      pk.setAttribute('cx', pt.x); pk.setAttribute('cy', pt.y);
+    } else {
+      const pt = cur.p.getPointAtLength(Math.min(1, u * 1.25) * cur.len);
+      pk.setAttribute('cx', pt.x); pk.setAttribute('cy', pt.y);
+    }
+    pk.setAttribute('fill', cur.col); pk.setAttribute('opacity', 1);
+  }
+
+  g.FlinkArch = {
+    start() {
+      listEls = Array.from(document.querySelectorAll('.arch-steps li'));
+      acc = 0; step = -1; on = true; lastTs = performance.now();
+      cancelAnimationFrame(raf); raf = requestAnimationFrame(tick);
+    },
+    stop() { on = false; cancelAnimationFrame(raf); },
+    setPaused(p) { paused = p; },
+    goto(i) { acc = i * DUR; }
+  };
+  // clicking a step jumps to it
+  document.addEventListener('click', e => {
+    const li = e.target.closest && e.target.closest('.arch-steps li');
+    if (li) g.FlinkArch.goto(+li.dataset.step);
+  });
+  txt('', 0, 0);
+  setTimeout(() => setStep(0), 0);
+})(window);
+
+</script>
+<script>
+/* ==========================================================
+   demos.js — canvas engine + demos (part 1)
+   Engine: one shared rAF loop that only drives canvases on the
+   current slide. Demos are deterministic functions of time t
+   (seconds since slide entry, looped by `period`) unless they
+   declare `sim` (stateful simulations driven by dt).
+   ========================================================== */
+(function (g) {
+  'use strict';
+  const TAU = Math.PI * 2;
+  const C = { cyan: '#22d3ee', blue: '#3b82f6', violet: '#8b5cf6', mag: '#e879f9', green: '#34d399', amber: '#fbbf24', red: '#fb7185', ink: '#e8eefc', mute: '#8f9cc0', dim: '#5b6a93' };
+  const KEYC = [C.cyan, C.violet, C.amber, C.mag];
+  const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const ease = t => t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+  const easeOut = t => 1 - Math.pow(1 - t, 3);
+  const seg = (t, a, b) => clamp((t - a) / (b - a));
+  const rgba = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; };
+  const AR = /[؀-ۿ]/;
+
+  function T(c, s, x, y, o = {}) {
+    c.save();
+    c.font = `${o.w || 500} ${o.s || 22}px ${o.mono ? "'JetBrains Mono',monospace" : "Vazirmatn,Inter,system-ui,sans-serif"}`;
+    c.fillStyle = o.c || C.ink; c.textAlign = o.a || 'center'; c.textBaseline = o.b || 'middle';
+    c.direction = AR.test(s) ? 'rtl' : 'ltr';
+    if (o.alpha != null) c.globalAlpha *= o.alpha;
+    if (o.glow) { c.shadowColor = o.glow; c.shadowBlur = o.gb || 14; }
+    c.fillText(s, x, y); c.restore();
+  }
+  function rr(c, x, y, w, h, r) { c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r); c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath(); }
+  function box(c, x, y, w, h, o = {}) {
+    c.save(); rr(c, x, y, w, h, o.r == null ? 16 : o.r);
+    if (o.glow) { c.shadowColor = o.glow; c.shadowBlur = (o.gb || 24) * .6; }
+    c.fillStyle = o.fill || 'rgba(10,16,40,.88)'; c.fill(); c.shadowBlur = 0;
+    if (o.stroke) { c.lineWidth = o.lw || 1.6; c.strokeStyle = o.stroke; if (o.dash) c.setLineDash(o.dash); c.stroke(); }
+    c.restore();
+  }
+  function dot(c, x, y, r, col, glow = 14, a = 1) { c.save(); c.globalAlpha *= a; c.shadowColor = col; c.shadowBlur = glow * .5; c.fillStyle = col; c.beginPath(); c.arc(x, y, r, 0, TAU); c.fill(); c.restore(); }
+  function sq(c, x, y, s, col, glow = 10, a = 1) { c.save(); c.globalAlpha *= a; c.shadowColor = col; c.shadowBlur = glow * .5; c.fillStyle = col; rr(c, x - s / 2, y - s / 2, s, s, s * .22); c.fill(); c.restore(); }
+  function ln(c, x1, y1, x2, y2, col, lw = 2, dash) { c.save(); c.strokeStyle = col; c.lineWidth = lw; if (dash) c.setLineDash(dash); c.beginPath(); c.moveTo(x1, y1); c.lineTo(x2, y2); c.stroke(); c.restore(); }
+  function poly(c, pts, col, lw = 2, dash) { c.save(); c.strokeStyle = col; c.lineWidth = lw; c.lineJoin = 'round'; if (dash) c.setLineDash(dash); c.beginPath(); pts.forEach((p, i) => i ? c.lineTo(p[0], p[1]) : c.moveTo(p[0], p[1])); c.stroke(); c.restore(); }
+  function along(pts, u) {
+    u = clamp(u); let tot = 0; const L = [];
+    for (let i = 1; i < pts.length; i++) { const d = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); L.push(d); tot += d; }
+    let s = u * tot;
+    for (let i = 0; i < L.length; i++) { if (s <= L[i] || i === L.length - 1) { const k = L[i] ? s / L[i] : 0; return [lerp(pts[i][0], pts[i + 1][0], k), lerp(pts[i][1], pts[i + 1][1], k)]; } s -= L[i]; }
+    return pts[pts.length - 1];
+  }
+  function chip(c, s, x, y, col, o = {}) {
+    c.save(); c.font = `600 ${o.s || 19}px Vazirmatn,Inter,sans-serif`; const w = c.measureText(s).width + 34, h = (o.s || 19) + 20; c.restore();
+    box(c, x - w / 2, y - h / 2, w, h, { r: h / 2, fill: rgba(col, .14), stroke: rgba(col, .7), lw: 1.3, glow: o.glow ? col : null, gb: 16 });
+    T(c, s, x, y + 1, { s: o.s || 19, c: col, w: 700 });
+  }
+  function ring(c, x, y, r, col, a = 1, lw = 3) { c.save(); c.globalAlpha *= a; c.strokeStyle = col; c.lineWidth = lw; c.shadowColor = col; c.shadowBlur = 16; c.beginPath(); c.arc(x, y, r, 0, TAU); c.stroke(); c.restore(); }
+  const H = { TAU, C, KEYC, clamp, lerp, ease, easeOut, seg, rgba, T, rr, box, dot, sq, ln, poly, along, chip, ring };
+
+  /* ------------------------------------------------------------------ engine */
+  const Demos = {}, inst = [];
+  const E = { Demos, H, paused: false, active: [], raf: 0, last: 0, running: false };
+
+  function build(cv) {
+    const name = cv.dataset.demo, f = Demos[name]; if (!f || cv.__demo) return;
+    const w = +cv.dataset.w, h = +cv.dataset.h, dpr = Math.min(g.devicePixelRatio || 1, cv.classList.contains('hero-canvas') ? 1 : 1.5);
+    cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+    const ctx = cv.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const api = { ctx, W: w, H: h, canvas: cv };
+    const d = f(api); d.cv = cv; d.api = api; d.t = 0; d.name = name; cv.__demo = d; inst.push(d);
+    try { d.draw(ctx, 0, 0); } catch (e) { console.error('[demo ' + name + ']', e); }
+  }
+
+  E.init = () => document.querySelectorAll('canvas[data-demo]').forEach(build);
+  E.activate = slide => {
+    E.active = inst.filter(d => slide && slide.contains(d.cv));
+    E.active.forEach(d => { d.t = 0; d.reset && d.reset(); });
+    if (!E.running) { E.running = true; E.last = performance.now(); E.raf = requestAnimationFrame(E.loop); }
+  };
+  E.deactivate = () => { E.active = []; };
+  E.restart = () => E.active.forEach(d => { d.t = 0; d.reset && d.reset(); });
+  E.loop = ts => {
+    E.raf = requestAnimationFrame(E.loop);
+    const dt = Math.min(.12, (ts - E.last) / 1000); E.last = ts;
+    if (document.hidden || !E.active.length) return;
+    for (const d of E.active) {
+      if (!E.paused) { d.t += dt; if (d.sim) d.sim(dt); }
+      const c = d.api.ctx; c.clearRect(0, 0, d.api.W, d.api.H);
+      try { d.draw(c, d.period ? d.t % d.period : d.t, dt); } catch (e) { console.error('[demo ' + d.name + ']', e); d.draw = () => {}; }
+      if (d.phase) { const p = d.phase(d.period ? d.t % d.period : d.t); if (p !== d._ph) { d._ph = p; d.cv.dispatchEvent(new CustomEvent('phase', { detail: p })); } }
+    }
+  };
+  g.FlinkDemos = E;
+
+  /* ------------------------------------------------------------------ HERO / FINALE */
+  Demos.hero = ({ canvas, W, H: HH }) => {
+    const dim = canvas.classList.contains('dim');
+    const N = 9, lanes = [], pk = [];
+    for (let i = 0; i < N; i++) lanes.push({ y: HH * (.1 + .8 * i / (N - 1)), amp: 22 + (i * 37) % 44, ph: i * 1.3, fr: .0016 + (i * 13 % 7) * .00022, col: [C.cyan, C.blue, C.violet, C.mag][i % 4] });
+    lanes.forEach((l, i) => { for (let k = 0; k < 7; k++) pk.push({ l, u: (k / 7 + i * .13) % 1, sp: .035 + ((i * 7 + k * 5) % 9) * .004, r: 2.2 + ((i + k) % 3) * .8 }); });
+    const yAt = (l, x, t) => { const u = x / W, conv = Math.pow(Math.abs(u - .5) * 2, 2.2) * .5; return lerp(l.y, HH * .5, conv) + Math.sin(x * l.fr + l.ph + t * .5) * l.amp * (1 - conv * .6); };
+    return {
+      draw(c, t) {
+        const A = dim ? .55 : 1;
+        c.save(); c.translate(W / 2, HH / 2);
+        for (let k = 0; k < 3; k++) { c.save(); c.rotate(t * (.04 + k * .015) * (k % 2 ? -1 : 1)); c.strokeStyle = rgba([C.cyan, C.violet, C.blue][k], .10 * A); c.lineWidth = 1.5; c.setLineDash([6 + k * 8, 18 + k * 10]); c.beginPath(); c.arc(0, 0, 400 + k * 110, 0, TAU); c.stroke(); c.restore(); }
+        c.restore();
+        for (const l of lanes) {
+          const g2 = c.createLinearGradient(0, 0, W, 0); g2.addColorStop(0, rgba(l.col, 0)); g2.addColorStop(.25, rgba(l.col, .16 * A)); g2.addColorStop(.75, rgba(l.col, .16 * A)); g2.addColorStop(1, rgba(l.col, 0));
+          c.strokeStyle = g2; c.lineWidth = 1.6; c.beginPath();
+          for (let x = 0; x <= W; x += 24) { const y = yAt(l, x, t); x ? c.lineTo(x, y) : c.moveTo(x, y); } c.stroke();
+        }
+        for (const p of pk) {
+          const u = (p.u + t * p.sp) % 1, x = u * W, y = yAt(p.l, x, t), a = Math.sin(u * Math.PI);
+          for (let k = 1; k < 5; k++) { const x2 = x - k * 14, y2 = yAt(p.l, x2, t); dot(c, x2, y2, p.r * (1 - k * .18), p.l.col, 0, a * .22 * (1 - k * .2) * A); }
+          dot(c, x, y, p.r, p.l.col, dim ? 8 : 14, a * A);
+        }
+      }
+    };
+  };
+  Demos.finale = Demos.hero;
+
+  /* ------------------------------------------------------------------ A · BATCH vs STREAM */
+  Demos.batchStream = () => {
+    const PER = 10.5, PW = 830, OY = 230;
+    const out = (c, ox, t, bars, ready) => {
+      box(c, ox + 700, 150, 112, 160, { stroke: ready ? rgba(C.green, .8) : 'rgba(120,150,255,.25)', glow: ready ? C.green : null, gb: 20 });
+      T(c, 'Output', ox + 756, 132, { s: 17, c: C.mute, mono: true });
+      bars.forEach((v, i) => { const h = v * 100; box(c, ox + 716 + i * 24, 290 - h, 16, Math.max(h, 2), { r: 4, fill: KEYC[i], stroke: null }); });
+    };
+    const timeline = (c, ox, t, ticks) => {
+      const x0 = ox + 40, x1 = ox + 790, y = 470, px = s => lerp(x0, x1, s / PER);
+      ln(c, x0, y, x1, y, 'rgba(120,150,255,.35)', 2);
+      T(c, 'time →', x1 - 4, y + 26, { s: 16, c: C.dim, a: 'right', mono: true });
+      T(c, 'output', x0, y - 40, { s: 16, c: C.dim, a: 'left', mono: true });
+      ticks.forEach(k => { if (t >= k.t) { const a = k.big ? 1 : .85, hh = k.big ? 34 : 14; ln(c, px(k.t), y, px(k.t), y - hh, k.c, k.big ? 5 : 3); dot(c, px(k.t), y - hh, k.big ? 6 : 3.5, k.c, 10, a); } });
+      ln(c, px(t), y - 48, px(t), y + 10, 'rgba(255,255,255,.35)', 1.5, [3, 4]);
+    };
+    const panel = (c, ox, title, sub, col) => {
+      box(c, ox, 10, PW, 540, { r: 24, fill: 'rgba(6,10,28,.55)', stroke: 'rgba(120,150,255,.14)' });
+      T(c, title, ox + 34, 48, { s: 34, w: 800, c: col, a: 'left', glow: col, gb: 18 });
+      T(c, sub, ox + PW - 30, 50, { s: 21, c: C.mute, a: 'right' });
+    };
+    return {
+      period: PER,
+      draw(c, t) {
+        /* ---------- BATCH ---------- */
+        let ox = 20; panel(c, ox, 'Batch', 'ابتدا انباشت، سپس پردازش', C.amber);
+        const evT = i => .3 + i * .5, slot = i => [ox + 247 + (i % 4) * 46, 208 + Math.floor(i / 4) * 52];
+        const state = t < 4.8 ? ['در حال انباشت داده…', C.amber] : t < 6.6 ? ['پردازش دسته', C.violet] : ['نتیجه آماده شد', C.green];
+        chip(c, state[0], ox + 415, 108, state[1], { glow: true });
+        dot(c, ox + 70, OY, 22, C.cyan, 20); T(c, 'Source', ox + 70, OY + 46, { s: 17, c: C.mute, mono: true });
+        box(c, ox + 230, 170, 200, 128, { stroke: rgba(C.amber, .6), dash: [6, 6], fill: 'rgba(30,22,6,.35)' });
+        T(c, 'Buffer / storage', ox + 330, 316, { s: 16, c: C.mute, mono: true });
+        const busy = t >= 4.8 && t < 6.6, pr = seg(t, 4.8, 6.6);
+        box(c, ox + 500, 165, 140, 130, { stroke: busy ? C.violet : 'rgba(120,150,255,.3)', glow: busy ? C.violet : null, gb: 30 });
+        T(c, 'Batch job', ox + 570, 205, { s: 21, w: 700 });
+        if (busy) { ring(c, ox + 570, 252, 24, C.violet, .25); c.save(); c.strokeStyle = C.cyan; c.lineWidth = 5; c.lineCap = 'round'; c.shadowColor = C.cyan; c.shadowBlur = 12; c.beginPath(); c.arc(ox + 570, 252, 24, -Math.PI / 2, -Math.PI / 2 + TAU * pr); c.stroke(); c.restore(); }
+        else T(c, t < 4.8 ? 'idle' : 'done', ox + 570, 252, { s: 18, c: t < 4.8 ? C.dim : C.green, mono: true });
+        ln(c, ox + 430, 235, ox + 500, 235, 'rgba(120,150,255,.3)', 2, [5, 6]); ln(c, ox + 640, 235, ox + 700, 235, 'rgba(120,150,255,.3)', 2, [5, 6]);
+        for (let i = 0; i < 8; i++) {
+          const te = evT(i), u = (t - te) / .55; if (u < 0) continue;
+          const [sx, sy] = slot(i), col = KEYC[i % 4];
+          if (t >= 4.8) { const f = seg(t, 4.8 + i * .03, 5.3 + i * .03); if (f >= 1) continue; const e = ease(f); sq(c, lerp(sx, ox + 570, e), lerp(sy, 252, e), 30 * (1 - e * .5), col, 10, 1 - e * .6); }
+          else if (u < 1) sq(c, lerp(ox + 92, sx, easeOut(u)), lerp(OY, sy, easeOut(u)), 30, col);
+          else sq(c, sx, sy, 30, col, 8);
+        }
+        if (t < 4.8) T(c, `${Math.min(8, Math.max(0, Math.floor((t - .85) / .5) + 1))} / 8`, ox + 330, 150, { s: 17, c: C.amber, mono: true });
+        const rf = easeOut(seg(t, 6.6, 7.1)); const bars = [.55, .9, .35, .7].map(v => v * rf);
+        out(c, ox, t, bars, t >= 6.6);
+        if (t >= 6.6 && t < 7.3) ring(c, ox + 756, 230, 30 + 90 * seg(t, 6.6, 7.3), C.green, 1 - seg(t, 6.6, 7.3), 3);
+        if (t < 6.6) T(c, 'منتظر…', ox + 756, 235, { s: 20, c: C.dim });
+        timeline(c, ox, t, [{ t: 6.6, c: C.green, big: true }]);
+
+        /* ---------- STREAM ---------- */
+        ox = 870; panel(c, ox, 'Stream', 'پردازش پیوسته و تدریجی', C.cyan);
+        chip(c, 'پردازش پیوسته', ox + 415, 108, C.cyan, { glow: true });
+        dot(c, ox + 70, OY, 22, C.cyan, 20); T(c, 'Source', ox + 70, OY + 46, { s: 17, c: C.mute, mono: true });
+        const pulse = (() => { let m = 0; for (let k = 0; k < 20; k++) { const d = Math.abs(t - (.3 + .55 * k + .9)); m = Math.max(m, 1 - d / .35); } return clamp(m); })();
+        box(c, ox + 440, 165, 200, 130, { stroke: rgba(C.cyan, .5 + .5 * pulse), glow: C.cyan, gb: 10 + 30 * pulse });
+        T(c, 'Stream job', ox + 540, 205, { s: 21, w: 700 }); T(c, 'incremental', ox + 540, 245, { s: 17, c: C.mute, mono: true });
+        dot(c, ox + 540, 270, 4 + 3 * pulse, C.cyan, 14);
+        ln(c, ox + 92, 235, ox + 440, 235, 'rgba(34,211,238,.28)', 3); ln(c, ox + 640, 235, ox + 700, 235, 'rgba(34,211,238,.28)', 3);
+        const counts = [0, 0, 0, 0], ticks = [];
+        for (let k = 0; k < 20; k++) {
+          const te = .3 + .55 * k, pass = te + .9; if (te > t) break;
+          const col = KEYC[k % 4], u = (t - te) / 1.45;
+          if (t >= pass + .1) { counts[k % 4]++; ticks.push({ t: pass + .1, c: col }); }
+          if (u < 0 || u > 1) continue;
+          const p = u < .62 ? [lerp(ox + 92, ox + 540, ease(u / .62 * .5 + 0) * 0 + u / .62), 235] : [lerp(ox + 540, ox + 756, (u - .62) / .38), 235];
+          dot(c, p[0], p[1], u < .62 ? 11 : 7, col, 14);
+        }
+        out(c, ox, t, counts.map(n => clamp((12 + 9 * n) / 100, 0, .98)), true);
+        timeline(c, ox, t, ticks);
+        T(c, 'نتیجه مدام به‌روز است', ox + 745, 335, { s: 15, c: C.green });
+      }
+    };
+  };
+
+  /* ------------------------------------------------------------------ 06 · PIPELINE */
+  Demos.pipeline = () => {
+    const PER = 18, DUR = 4.4;
+    const Y = 215, aggY = [120, 310];
+    const route = k => [[230, Y], [320, Y], [700, Y], [980, aggY[k]], [1100, aggY[k]], [1330, Y]];
+    const SEQ = [0, 1, 1, 0, 1, 0, 0, 1], N = 38;
+    const nodeBox = (c, x, y, w, h, title, sub, col, glow) => {
+      box(c, x, y, w, h, { stroke: rgba(col, .45 + .55 * glow), glow: col, gb: 6 + 30 * glow });
+      T(c, title, x + w / 2, y + h * .4, { s: 24, w: 700 }); T(c, sub, x + w / 2, y + h * .72, { s: 16, c: C.mute, mono: true });
+    };
+    return {
+      period: PER,
+      draw(c, t) {
+        const pk = [];
+        for (let n = 0; n < N; n++) { const te = .3 + n * .45, u = (t - te) / DUR; if (u < 0 || u > 1) continue; pk.push({ n, u, k: SEQ[n % 8], drop: n % 5 === 4 }); }
+        const glowAt = x => { let m = 0; pk.forEach(p => { const px = along(route(p.k), p.u)[0]; m = Math.max(m, 1 - Math.abs(px - x) / 90); }); return clamp(m); };
+        // connections
+        poly(c, [[230, Y], [320, Y]], 'rgba(34,211,238,.25)', 3); poly(c, [[480, Y], [520, Y]], 'rgba(34,211,238,.25)', 3); poly(c, [[680, Y], [700, Y]], 'rgba(34,211,238,.25)', 3);
+        aggY.forEach(y => { poly(c, [[700, Y], [980, y]], 'rgba(139,92,246,.28)', 2.5); poly(c, [[1220, y], [1330, Y]], 'rgba(52,211,153,.28)', 2.5); });
+        // chain frame
+        box(c, 300, 112, 400, 206, { r: 22, fill: 'rgba(251,191,36,.03)', stroke: rgba(C.amber, .55), dash: [8, 8] });
+        T(c, 'Operator chain · یک Task', 500, 100, { s: 17, c: C.amber });
+        nodeBox(c, 40, 160, 190, 110, 'Source', 'fromSource', C.cyan, glowAt(135));
+        nodeBox(c, 320, 160, 160, 110, 'map', 'parse', C.blue, glowAt(400));
+        nodeBox(c, 520, 160, 160, 110, 'filter', 'amount>0', C.blue, glowAt(600));
+        // keyBy shuffle
+        chip(c, 'keyBy', 840, Y - 72, C.violet); T(c, 'repartition · shuffle', 840, Y + 90, { s: 15, c: C.dim, mono: true });
+        const cnt = [0, 0], tot = [0];
+        for (let n = 0; n < N; n++) { const te = .3 + n * .45; if (n % 5 === 4) continue; if (t >= te + DUR * .72) cnt[SEQ[n % 8]]++; if (t >= te + DUR) tot[0]++; }
+        aggY.forEach((y, i) => {
+          const gl = glowAt(1100) * (pk.some(p => p.k === i && Math.abs(along(route(i), p.u)[1] - y) < 30) ? 1 : .2);
+          box(c, 980, y - 52, 240, 104, { stroke: rgba(KEYC[i + 1], .5 + .5 * gl), glow: KEYC[i + 1], gb: 8 + 26 * gl });
+          T(c, 'window · sum', 1100, y - 16, { s: 21, w: 700 }); T(c, `subtask ${i}  ·  Σ ${cnt[i]}`, 1100, y + 22, { s: 16, c: C.mute, mono: true });
+        });
+        nodeBox(c, 1330, 160, 190, 110, 'Sink', 'sinkTo', C.green, glowAt(1425));
+        T(c, `results: ${tot[0]}`, 1425, 292, { s: 16, c: C.green, mono: true });
+        // labels
+        T(c, 'Sources', 135, 395, { s: 20, c: C.cyan, w: 700 }); T(c, 'Transformations', 500, 395, { s: 20, c: C.blue, w: 700 }); T(c, 'Stateful operators', 1100, 395, { s: 20, c: C.violet, w: 700 }); T(c, 'Sinks', 1425, 395, { s: 20, c: C.green, w: 700 });
+        ['ورود داده', 'تبدیل‌ها در یک Task ادغام می‌شوند', 'هر کلید به یک subtask می‌رود', 'خروجی'].forEach((s, i) => T(c, s, [135, 500, 1100, 1425][i], 427, { s: 16, c: C.mute }));
+        // packets
+        pk.forEach(p => {
+          const r = route(p.k); let [x, y] = along(r, p.u); let col = C.cyan, a = 1, s = 24;
+          if (x > 320) col = C.blue; if (x > 700) col = KEYC[p.k + 1]; if (x > 1220) { col = C.green; s = 26; }
+          if (p.drop && x > 570) { const f = clamp((x - 570) / 40); col = C.red; a = 1 - f; s *= 1 - f * .4; if (f > .9) return; }
+          sq(c, x, y, s, col, 14, a);
+        });
+      }
+    };
+  };
+
+  /* ------------------------------------------------------------------ B · DISTRIBUTED */
+  Demos.distributed = ({ W, H: HH }) => {
+    const YS = { 1: [320], 2: [215, 425], 4: [150, 270, 390, 510] };
+    const SEQ = [0, 2, 1, 3, 0, 1, 2, 3, 0, 3, 1, 2], SX = 80, KX = [190, 320], SBX = 500, MX = 830, SKX = 1000;
+    let par = 4, ev, subs, spawn, n, done, bp, hb;
+    const reset = () => { ev = []; subs = YS[par].map(y => ({ y, q: [], busy: null, prog: 0, handled: 0 })); spawn = 0; n = 0; done = 0; bp = false; hb = 0; };
+    reset();
+    const sub = k => k % par;
+    return {
+      setPar(p) { par = p; reset(); },
+      reset,
+      sim(dt) {
+        hb += dt; spawn += dt;
+        const pend = subs.reduce((a, s) => a + s.q.length, 0);
+        bp = pend >= 12;
+        while (spawn >= .3) { spawn -= .3; if (!bp) { ev.push({ k: SEQ[n++ % SEQ.length], st: 0, t: 0 }); } }
+        subs.forEach(s => { if (!s.busy && s.q.length) { s.busy = s.q.shift(); s.prog = 0; } if (s.busy) { s.prog += dt / .55; if (s.prog >= 1) { ev.push({ k: s.busy.k, st: 3, t: 0, sub: s }); s.busy = null; s.handled++; } } });
+        for (const e of ev) {
+          e.t += dt; const dur = [.45, .55, 0, .5, .4][e.st];
+          if (e.st !== 2 && e.t >= dur) { e.t = 0; if (e.st === 0) e.st = 1; else if (e.st === 1) { e.st = 2; subs[sub(e.k)].q.push(e); } else if (e.st === 3) e.st = 4; else { e.dead = true; done++; } }
+        }
+        ev = ev.filter(e => !e.dead && !(e.st === 2 && !subs.some(s => s.q.includes(e)) && !subs.some(s => s.busy === e) && e.t > 0 && false));
+        ev = ev.filter(e => e.st !== 2 || subs.some(s => s.q.includes(e)));
+      },
+      draw(c, t) {
+        const ys = YS[par], sy = i => ys[i];
+        // TaskManagers
+        const tms = par === 1 ? [[0]] : par === 2 ? [[0], [1]] : [[0, 1], [2, 3]];
+        box(c, 470, 12, 240, 50, { r: 14, stroke: rgba(C.violet, .7), fill: 'rgba(30,20,60,.6)' }); T(c, 'JobManager', 590, 37, { s: 20, w: 700, c: '#c4b5fd' });
+        tms.forEach((g2, gi) => {
+          const y0 = sy(g2[0]) - 58, y1 = sy(g2[g2.length - 1]) + 58;
+          box(c, 466, y0, 248, y1 - y0, { r: 20, fill: 'rgba(34,211,238,.03)', stroke: rgba(C.cyan, .4), dash: [7, 7] });
+          T(c, 'TaskManager ' + (gi + 1), 480, y0 + 14, { s: 14, c: C.cyan, a: 'left', mono: true });
+          const px = 590, py = y0; ln(c, px, 62, px + (gi - (tms.length - 1) / 2) * 60, py, rgba(C.violet, .35), 1.5, [4, 6]);
+          const u = ((hb * .5 + gi * .4) % 1); const [hx, hy] = along([[px, py], [px, 62]], u); dot(c, hx, hy, 3, C.violet, 8, .8);
+        });
+        // source / keyBy / merge / sink
+        dot(c, SX, 320, 34, C.cyan, 24); T(c, 'Source', SX, 372, { s: 17, c: C.mute, mono: true });
+        box(c, KX[0], 282, KX[1] - KX[0], 76, { stroke: rgba(C.violet, .7), glow: C.violet, gb: 14 }); T(c, 'keyBy', 255, 312, { s: 22, w: 700 }); T(c, 'hash(key)', 255, 338, { s: 15, c: C.mute, mono: true });
+        ln(c, SX + 34, 320, KX[0], 320, 'rgba(34,211,238,.3)', 2.5);
+        ys.forEach(y => poly(c, [[KX[1], 320], [SBX, y]], 'rgba(139,92,246,.22)', 2));
+        ys.forEach(y => poly(c, [[SBX + 190, y], [MX, 320]], 'rgba(52,211,153,.2)', 2));
+        box(c, MX, 285, 100, 70, { stroke: rgba(C.green, .6) }); T(c, 'merge', MX + 50, 320, { s: 20, w: 700 });
+        ln(c, MX + 100, 320, SKX, 320, 'rgba(52,211,153,.3)', 2.5);
+        box(c, SKX, 270, 140, 100, { stroke: rgba(C.green, .7), glow: C.green, gb: 16 }); T(c, 'Sink', SKX + 70, 308, { s: 22, w: 700 }); T(c, `Σ ${done}`, SKX + 70, 340, { s: 20, c: C.green, mono: true });
+        // subtasks
+        subs.forEach((s, i) => {
+          const busy = !!s.busy;
+          box(c, SBX, s.y - 38, 190, 76, { stroke: busy ? rgba(C.amber, .9) : rgba(C.cyan, .45), glow: busy ? C.amber : null, gb: 20 });
+          T(c, `subtask ${i}`, SBX + 95, s.y - 14, { s: 17, w: 700 }); T(c, `n=${s.handled}`, SBX + 95, s.y + 8, { s: 14, c: C.mute, mono: true });
+          box(c, SBX + 12, s.y + 22, 166, 6, { r: 3, fill: 'rgba(120,150,255,.18)' }); if (busy) box(c, SBX + 12, s.y + 22, 166 * clamp(s.prog), 6, { r: 3, fill: C.amber });
+          s.q.slice(0, 8).forEach((e, qi) => sq(c, SBX - 14 - qi * 0, s.y - 28 + qi * 8, 6, KEYC[e.k], 4));
+        });
+        // packets
+        ev.forEach(e => {
+          const u = e.t / [.45, .55, 1, .5, .4][e.st], col = KEYC[e.k];
+          let p;
+          if (e.st === 0) p = [lerp(SX + 34, KX[0], u), 320];
+          else if (e.st === 1) p = along([[KX[1], 320], [SBX, sy(sub(e.k))]], ease(u));
+          else if (e.st === 3) p = along([[SBX + 190, e.sub.y], [MX, 320]], u);
+          else if (e.st === 4) p = [lerp(MX + 100, SKX, u), 320];
+          else return;
+          sq(c, p[0], p[1], e.st === 3 || e.st === 4 ? 14 : 18, e.st > 2 ? C.green : col, 10);
+        });
+        // legend + backpressure
+        ['A', 'B', 'C', 'D'].forEach((k, i) => { sq(c, 60 + i * 70, 560, 16, KEYC[i], 6); T(c, k, 78 + i * 70, 560, { s: 12, c: C.mute, a: 'left', mono: true }); });
+        if (bp) chip(c, 'backpressure · فشار برگشتی', 150, 270, C.red, { glow: true, s: 17 });
+        T(c, `parallelism = ${par}`, 1090, 600, { s: 20, c: C.cyan, a: 'right', mono: true });
+        T(c, 'Source: events', SX, 280, { s: 13, c: C.dim, mono: true, alpha: 0 });
+      }
+    };
+  };
+
+  /* ------------------------------------------------------------------ 08 · STATE */
+  Demos.state = () => {
+    const PER = 12.6, NAMES = ['alice', 'bob', 'carol', 'dave'], SEQ = [0, 1, 0, 2, 0, 3, 1, 0, 2, 1, 0, 1];
+    const te = i => .4 + i * .9, arr = i => te(i) + .7;
+    const rowY = i => 178 + i * 62;
+    return {
+      period: PER,
+      draw(c, t) {
+        const cnt = [0, 0, 0, 0], last = [];
+        SEQ.forEach((k, i) => { if (t >= arr(i)) { cnt[k]++; last.push([k, cnt[k], arr(i) + .5]); } });
+        // operator
+        box(c, 380, 80, 420, 340, { r: 22, stroke: rgba(C.violet, .7), glow: C.violet, gb: 24 });
+        T(c, 'KeyedProcessFunction', 590, 112, { s: 22, w: 700, c: '#c4b5fd' }); T(c, 'count per key · ValueState<Long>', 590, 140, { s: 15, c: C.mute, mono: true });
+        NAMES.forEach((nm, i) => {
+          const hit = SEQ.reduce((m, k, j) => k === i ? Math.max(m, 1 - (t - arr(j)) / .6) : m, 0), h = clamp(hit);
+          box(c, 404, rowY(i) - 24, 372, 48, { r: 12, fill: rgba(KEYC[i], .05 + .18 * h), stroke: rgba(KEYC[i], .3 + .6 * h) });
+          T(c, nm, 424, rowY(i), { s: 21, a: 'left', w: 600 });
+          box(c, 540, rowY(i) - 8, 170, 16, { r: 8, fill: 'rgba(120,150,255,.14)' }); box(c, 540, rowY(i) - 8, Math.max(0, 170 * cnt[i] / 6), 16, { r: 8, fill: KEYC[i], glow: KEYC[i], gb: 8 + 14 * h });
+          T(c, String(cnt[i]), 752, rowY(i), { s: 26, w: 800, c: KEYC[i], a: 'right', mono: true });
+        });
+        // backend
+        box(c, 380, 470, 420, 96, { r: 18, stroke: rgba(C.cyan, .5), fill: 'rgba(8,24,40,.7)' });
+        T(c, 'State Backend', 590, 497, { s: 20, w: 700, c: C.cyan }); T(c, 'HashMap (heap)  ·  RocksDB (local disk)', 590, 530, { s: 15, c: C.mute, mono: true });
+        for (let i = 0; i < 4; i++) ln(c, 420 + i * 100, 420, 420 + i * 100, 470, rgba(KEYC[i], .35), 2, [3, 5]);
+        // durable storage
+        const sn = Math.floor(t / 6.2); const sp = seg(t % 6.2, 4, 5.2), done2 = t % 6.2 >= 5.2 || (t >= 6.2 && t % 6.2 < 4 && false);
+        const stored = t >= 5.2;
+        box(c, 900, 470, 220, 96, { r: 18, stroke: stored ? rgba(C.green, .7) : 'rgba(120,150,255,.3)', glow: stored ? C.green : null, gb: 18 });
+        T(c, 'Checkpoint storage', 1010, 497, { s: 19, w: 700, c: stored ? C.green : C.mute }); T(c, stored ? 'snapshot ✓' : 'S3 · HDFS · …', 1010, 530, { s: 15, c: C.mute, mono: true });
+        if (t % 6.2 >= 4 && t % 6.2 < 5.2) { const [px, py] = along([[800, 518], [900, 518]], sp); for (let i = 0; i < 3; i++) sq(c, px - i * 12, py, 10, C.violet, 10, 1 - i * .3); chip(c, 'barrier', 850, 470, C.violet, { s: 14 }); }
+        // incoming events
+        poly(c, [[40, 250], [380, 250]], 'rgba(34,211,238,.2)', 2.5);
+        T(c, 'Input stream', 100, 215, { s: 16, c: C.mute, mono: true }); T(c, 'user events', 100, 285, { s: 14, c: C.dim, mono: true });
+        SEQ.forEach((k, i) => { const u = (t - te(i)) / .7; if (u < 0 || u > 1) return; const x = lerp(40, 380, easeOut(u)); box(c, x - 26, 238, 52, 24, { r: 8, fill: rgba(KEYC[k], .85), stroke: null, glow: KEYC[k], gb: 10 }); T(c, NAMES[k][0].toUpperCase() + '+1', x, 251, { s: 13, c: '#04101f', w: 800, mono: true }); });
+        // outputs
+        box(c, 900, 80, 220, 340, { r: 22, stroke: rgba(C.green, .5) });
+        T(c, 'Output stream', 1010, 112, { s: 20, w: 700, c: C.green }); T(c, 'updated counts', 1010, 138, { s: 14, c: C.mute, mono: true });
+        poly(c, [[800, 250], [900, 250]], 'rgba(52,211,153,.25)', 2.5);
+        SEQ.forEach((k, i) => { const u = (t - (arr(i) + .05)) / .45; if (u < 0 || u > 1) return; sq(c, lerp(800, 900, u), 250, 14, KEYC[k], 12); });
+        last.filter(l => t >= l[2]).slice(-6).reverse().forEach((l, r) => {
+          const a = 1 - r * .14; T(c, `${NAMES[l[0]]} → ${l[1]}`, 930, 178 + r * 38, { s: 20, a: 'left', c: KEYC[l[0]], mono: true, alpha: a });
+        });
+        T(c, 'رویدادهای گذشته در state خلاصه می‌شوند', 590, 604, { s: 17, c: C.mute });
+      }
+    };
+  };
+
+})(window);
+
+</script>
+<script>
+/* ==========================================================
+   demos2.js — canvas demos (part 2): time, watermarks,
+   fault tolerance, Kafka pipeline, fraud detection.
+   ========================================================== */
+(function (g) {
+  'use strict';
+  const E = g.FlinkDemos, D = E.Demos;
+  const { C, KEYC, clamp, lerp, ease, easeOut, seg, rgba, T, box, dot, sq, ln, poly, along, chip, ring, TAU } = E.H;
+
+  /* ------------------------------------------------------------------ 09 · EVENT vs PROCESSING TIME */
+  D.time = () => {
+    const PER = 17;
+    // [label, eventTime, processingTime]
+    const EV = [['a', 1, 1.2], ['b', 3, 3.1], ['c', 2, 6.0], ['d', 6, 6.8], ['e', 5, 7.5], ['f', 8, 8.6], ['g', 9, 11.0]];
+    const X0 = 90, X1 = 850, Y0 = 500, Y1 = 50, px = e => lerp(X0, X1, e / 10), py = p => lerp(Y0, Y1, p / 12);
+    const SPEED = 1; // 1 processing-time unit per second
+    return {
+      period: PER,
+      draw(c, t) {
+        const pt = clamp((t - .6) * SPEED, 0, 12);
+        box(c, 10, 10, 880, 560, { r: 24, fill: 'rgba(6,10,28,.55)', stroke: 'rgba(120,150,255,.14)' });
+        // bands: event-time windows (vertical) & processing-time windows (horizontal)
+        [[0, 5], [5, 10]].forEach(([a, b], i) => { c.fillStyle = rgba(C.cyan, i ? .05 : .09); c.fillRect(px(a), Y1, px(b) - px(a), Y0 - Y1); });
+        [[0, 5], [5, 10], [10, 15]].forEach(([a, b], i) => { const ya = py(Math.min(b, 12)), yb = py(a); c.fillStyle = rgba(C.amber, i === 1 ? .08 : .04); c.fillRect(X0, ya, X1 - X0, yb - ya); });
+        // axes
+        ln(c, X0, Y0, X1, Y0, 'rgba(160,180,230,.5)', 2); ln(c, X0, Y0, X0, Y1, 'rgba(160,180,230,.5)', 2);
+        for (let i = 0; i <= 10; i += 5) { ln(c, px(i), Y0, px(i), Y0 + 8, C.mute, 2); T(c, String(i), px(i), Y0 + 26, { s: 15, c: C.mute, mono: true }); ln(c, px(i), Y1, px(i), Y0, rgba(C.cyan, .25), 1.2, [4, 6]); }
+        for (let i = 0; i <= 10; i += 5) { ln(c, X0 - 8, py(i), X0, py(i), C.mute, 2); T(c, String(i), X0 - 22, py(i), { s: 15, c: C.mute, mono: true }); ln(c, X0, py(i), X1, py(i), rgba(C.amber, .25), 1.2, [4, 6]); }
+        ln(c, X0, py(10), X1, py(10), rgba(C.amber, .25), 1.2, [4, 6]);
+        T(c, 'Event time →', (X0 + X1) / 2, Y0 + 52, { s: 18, c: C.cyan, w: 600 });
+        c.save(); c.translate(32, (Y0 + Y1) / 2); c.rotate(-Math.PI / 2); T(c, 'Processing time →', 0, 0, { s: 18, c: C.amber, w: 600 }); c.restore();
+        // ideal diagonal
+        ln(c, px(0), py(0), px(10), py(10), 'rgba(255,255,255,.3)', 1.6, [8, 8]); T(c, 'بدون تأخیر', px(8.2), py(10.3), { s: 14, c: C.mute });
+        // playhead
+        ln(c, X0, py(pt), X1, py(pt), rgba(C.amber, .9), 2); T(c, 'now', X1 + 4, py(pt), { s: 14, c: C.amber, a: 'left', mono: true });
+        // points
+        const et = [0, 0], ptc = [0, 0, 0];
+        EV.forEach(([lb, e, p]) => {
+          if (pt < p) return; const k = easeOut(clamp((pt - p) / .4)), late = p - e > 1;
+          const col = late ? C.red : C.cyan; ln(c, px(e), py(p), px(e), py(e), rgba(col, .4 * k), 1.5, [3, 4]);
+          dot(c, px(e), py(p), 10 * k + 2, col, 16); T(c, lb, px(e), py(p) - 24, { s: 16, c: col, w: 700, mono: true });
+          et[e < 5 ? 0 : 1]++; ptc[Math.floor(p / 5)]++;
+        });
+        // right: results
+        const rx = 920, ry = 10;
+        const res = (y, title, sub, col, rows) => {
+          box(c, rx, y, 790, 250, { r: 24, stroke: rgba(col, .45), glow: col, gb: 8, fill: 'rgba(8,13,34,.75)' });
+          T(c, title, rx + 28, y + 40, { s: 26, w: 800, c: col, a: 'left' }); T(c, sub, rx + 762, y + 42, { s: 17, c: C.mute, a: 'right' });
+          rows.forEach(([lab, n, ids], i) => {
+            const yy = y + 100 + i * 56; T(c, lab, rx + 28, yy, { s: 20, a: 'left', c: C.ink, mono: true });
+            box(c, rx + 190, yy - 18, 360, 36, { r: 10, fill: 'rgba(120,150,255,.08)' });
+            for (let k = 0; k < n; k++) sq(c, rx + 212 + k * 40, yy, 26, col, 8);
+            T(c, '= ' + n, rx + 740, yy, { s: 28, w: 800, c: col, a: 'right', mono: true });
+          });
+        };
+        res(10, 'Event-time windows', 'نتیجه قطعی؛ حتی در پردازش مجدد', C.cyan, [['[0,5)', et[0]], ['[5,10)', et[1]]]);
+        res(290, 'Processing-time windows', 'به تأخیر شبکه و بار سیستم وابسته است', C.amber, [['[0,5)', ptc[0]], ['[5,10)', ptc[1]], ['[10,15)', ptc[2]]]);
+        T(c, 'رویدادهای c و g دیر رسیده‌اند (قرمز)؛ در پنجرهٔ زمان‌پردازش به باکت دیگری می‌افتند.', rx + 395, 560, { s: 16, c: C.mute });
+      }
+    };
+  };
+
+  /* ------------------------------------------------------------------ 10 · WINDOWS & WATERMARKS */
+  D.watermark = () => {
+    const PER = 19;
+    const TS = [3, 6, 4, 9, 8, 13, 11, 7, 18, 16, 22, 19, 24], BOUND = 3, START = 1.2, STEP = 1.1;
+    const X0 = 100, X1 = 1620, px = v => lerp(X0, X1, v / 30), WY0 = 235, WY1 = 400;
+    const arrT = i => START + i * STEP;
+    // precompute watermark after each arrival, window membership, firing
+    let mx = -1e9; const WM = TS.map(v => (mx = Math.max(mx, v), mx - BOUND));
+    const fireAt = [null, null, null]; WM.forEach((w, i) => { for (let k = 0; k < 2; k++) if (fireAt[k] == null && w >= (k + 1) * 10) fireAt[k] = i; });
+    const wmAt = t => { let prev = 0, i = -1; for (let k = 0; k < TS.length; k++) if (t >= arrT(k) + .5) i = k; const w0 = i < 0 ? 0 : Math.max(0, WM[i]); return w0; };
+    return {
+      period: PER,
+      draw(c, t) {
+        box(c, 10, 10, 1700, 540, { r: 24, fill: 'rgba(6,10,28,.55)', stroke: 'rgba(120,150,255,.14)' });
+        // windows
+        const cnt = [0, 0, 0], lateList = [], fired = [false, false, false];
+        const slotCount = [0, 0, 0];
+        for (let k = 0; k < 3; k++) {
+          const x = px(k * 10), w = px((k + 1) * 10) - x, fi = fireAt[k], firedNow = fi != null && t >= arrT(fi) + .5, fl = fi != null ? clamp(1 - (t - arrT(fi) - .5) / .9) : 0;
+          fired[k] = firedNow;
+          box(c, x + 4, WY0, w - 8, WY1 - WY0, { r: 18, fill: rgba(firedNow ? C.green : C.blue, .07), stroke: rgba(firedNow ? C.green : C.blue, .55), glow: firedNow ? C.green : null, gb: 30 * fl + 4 });
+          T(c, `window [${k * 10}, ${(k + 1) * 10})`, x + w / 2, WY0 + 24, { s: 19, w: 700, c: firedNow ? C.green : '#9db8ff', mono: true });
+          if (firedNow && fi != null) { const n = TS.filter((v, i) => v >= k * 10 && v < (k + 1) * 10 && i <= fi).length; chip(c, `FIRE → Σ = ${n}`, x + w / 2, WY1 - 26, C.green, { glow: fl > .01, s: 17 }); }
+        }
+        // axis
+        ln(c, X0, 440, X1, 440, 'rgba(160,180,230,.45)', 2);
+        for (let v = 0; v <= 30; v += 5) { ln(c, px(v), 440, px(v), 448, C.mute, 2); T(c, String(v), px(v), 468, { s: 15, c: C.mute, mono: true }); }
+        T(c, 'Event time →', X0, 496, { s: 16, c: C.cyan, a: 'left', mono: true });
+        // events
+        TS.forEach((v, i) => {
+          const a0 = arrT(i), u = (t - a0) / .5; if (u < 0) return;
+          const k = Math.floor(v / 10), isLate = fireAt[k] != null && fireAt[k] < i;
+          const x = px(v); let y;
+          if (isLate) {
+            if (u < 1) y = lerp(70, WY0 + 30, easeOut(u));
+            else { const f = ease(seg(t, a0 + .5, a0 + 1.4)); y = lerp(WY0 + 30, 520, f); lateList.push(v); }
+            const col = C.red, xx = isLate && t > a0 + .5 ? lerp(x, 1480, ease(seg(t, a0 + .5, a0 + 1.4))) : x;
+            sq(c, xx, y, 26, col, 14); T(c, String(v), xx, y, { s: 13, c: '#fff', mono: true, w: 800 });
+          } else {
+            const idx = slotCount[k]++; const sx = px(k * 10) + 40 + (idx % 6) * 44, sy = WY0 + 70 + Math.floor(idx / 6) * 40;
+            const x1 = u < 1 ? lerp(x, sx, ease(u)) : sx, y1 = u < 1 ? lerp(70, sy, easeOut(u)) : sy;
+            sq(c, x1, y1, 26, fired[k] ? C.green : KEYC[i % 4], 10); T(c, String(v), x1, y1, { s: 13, c: '#04101f', mono: true, w: 800 });
+          }
+        });
+        // late box
+        const hasLate = lateList.length > 0;
+        box(c, 1250, 482, 440, 54, { r: 14, stroke: rgba(C.red, hasLate ? .9 : .35), glow: hasLate ? C.red : null, gb: 18, fill: 'rgba(40,10,20,.5)' });
+        T(c, hasLate ? `late event ts=${lateList[0]} < watermark → side output` : 'side output · late events', 1470, 509, { s: 16, c: C.red, mono: true });
+        // watermark (smooth)
+        const targets = TS.map((v, i) => [arrT(i) + .5, Math.max(0, WM[i])]);
+        let w = 0, prevT = 0, prevW = 0; for (const [tt, ww] of targets) { if (t >= tt) { prevT = tt; prevW = ww; } }
+        let wv = prevW; const nx = targets.find(([tt]) => tt > t); if (nx && nx[1] > prevW) wv = lerp(prevW, nx[1], ease(clamp((t - (nx[0] - .4)) / .4)));
+        const wx = px(wv);
+        c.save(); const gr = c.createLinearGradient(wx - 40, 0, wx, 0); gr.addColorStop(0, 'rgba(232,121,249,0)'); gr.addColorStop(1, 'rgba(232,121,249,.25)'); c.fillStyle = gr; c.fillRect(wx - 40, 60, 40, 380); c.restore();
+        ln(c, wx, 60, wx, 440, C.mag, 3); dot(c, wx, 60, 7, C.mag, 18);
+        chip(c, `Watermark = ${Math.round(wv)}`, clamp(wx, 150, 1560), 36, C.mag, { s: 18, glow: true });
+        T(c, 'Watermark = maxTimestamp − 3  (BoundedOutOfOrderness)', 40, 524, { s: 16, c: C.mute, a: 'left', mono: true });
+      }
+    };
+  };
+
+  /* ------------------------------------------------------------------ C · FAULT TOLERANCE */
+  D.fault = () => {
+    const PER = 16.5, DUR = 2.3, Y = 205, X0 = 270, X1 = 1400;
+    const path = [[X0, Y], [X1, Y]], AGGX = 1065, FAIL = 7.4, REC0 = 8.8, REST = 10.4, RES = 10.8;
+    const S = t => t < FAIL ? Math.floor(2 * t) : t < REST ? Math.floor(2 * FAIL) : t < RES ? 8 : 8 + Math.floor(2 * (t - RES));
+    const Cn = t => t < FAIL ? Math.max(0, Math.floor(2 * (t - 1.6))) : t < REST ? Math.max(0, Math.floor(2 * (FAIL - 1.6))) : t < RES + 1.6 ? 8 : 8 + Math.floor(2 * (t - RES - 1.6));
+    const nodeB = (c, x, w, title, sub, col, g, bad) => {
+      box(c, x, 150, w, 110, { stroke: bad ? C.red : rgba(col, .5 + .5 * g), glow: bad ? C.red : col, gb: bad ? 34 : 6 + 24 * g, fill: bad ? 'rgba(60,10,20,.7)' : undefined });
+      T(c, title, x + w / 2, 182, { s: 24, w: 700, c: bad ? C.red : C.ink }); T(c, sub, x + w / 2, 226, { s: 20, c: bad ? C.red : col, mono: true, w: 700 });
+    };
+    return {
+      period: PER,
+      phase(t) { return t < 3.8 ? 1 : t < FAIL ? 2 : t < REC0 ? 3 : t < RES ? 4 : 5; },
+      draw(c, t) {
+        const ph = this.phase(t), failed = t >= FAIL && t < REC0, restarting = t >= REC0 && t < RES;
+        poly(c, path, 'rgba(34,211,238,.22)', 3);
+        // coordinator + storage
+        box(c, 670, 12, 400, 54, { r: 16, stroke: rgba(C.violet, .7), fill: 'rgba(30,20,60,.6)' }); T(c, 'Checkpoint Coordinator · JobManager', 870, 39, { s: 18, w: 700, c: '#c4b5fd' });
+        const trig = seg(t, 3.7, 4.1), chk1 = t >= 4.5, chk2 = t >= 6.0, chkOk = t >= 6.4;
+        const stOK = chkOk;
+        box(c, 640, 330, 460, 90, { r: 18, stroke: stOK ? rgba(C.green, .8) : 'rgba(120,150,255,.3)', glow: stOK ? C.green : null, gb: 18, fill: 'rgba(6,24,24,.55)' });
+        T(c, 'Durable checkpoint storage  (S3 · HDFS …)', 870, 353, { s: 17, c: stOK ? C.green : C.mute, w: 700 });
+        T(c, chkOk ? 'chk-1 ✓  offset=8 · count=8' : chk1 ? 'chk-1 …  offset=8 ✓' + (chk2 ? ' · count=8 ✓' : '') : 'no checkpoint yet', 870, 392, { s: 19, c: chkOk ? C.green : C.amber, mono: true, w: 700 });
+        // coordinator trigger lines
+        if (t > 3.6 && t < 6.6) { const a = t < 4.2 ? 1 : .35; poly(c, [[870, 66], [870, 110], [185, 110], [185, 150]], rgba(C.violet, .5 * a), 2, [5, 6]); if (t < 4.2) { const [qx, qy] = along([[870, 66], [870, 110], [185, 110], [185, 150]], trig); dot(c, qx, qy, 6, C.violet, 16); } }
+        // nodes
+        const gl = x => { let m = 0; for (let n = 0; n < 40; n++) { const te = n * .5, p = (t - te) / DUR; if (p < 0 || p > 1 || (t >= FAIL && te < FAIL) ) continue; m = Math.max(m, 1 - Math.abs(lerp(X0, X1, p) - x) / 80); } return clamp(m); };
+        const frozen = t >= FAIL && t < REST, sN = S(t), cN = Cn(t), flash = t >= REST && t < REST + .8 ? 1 - (t - REST) / .8 : 0;
+        nodeB(c, 40, 190, 'Source', `offset ${sN}`, C.cyan, gl(135) + flash, false);
+        nodeB(c, 520, 170, 'map', 'stateless', C.blue, gl(605), false);
+        nodeB(c, 960, 210, 'Window · Σ', failed ? '✕ FAILED' : restarting ? '↻ restarting' : `state ${cN}`, C.violet, gl(AGGX) + flash, failed);
+        nodeB(c, 1400, 170, 'Sink', 'transactional', C.green, gl(1485), false);
+        if (restarting) { ring(c, 1065, Y, 70 + 6 * Math.sin(t * 8), C.amber, .7, 3); }
+        // packets
+        const runA = t < FAIL + .5, runB = t >= RES;
+        const emit = (te, a) => { const u = (t - te) / DUR; if (u < 0 || u > 1) return; const [x, y] = along(path, u); sq(c, x, y, 22, u < .7 ? C.cyan : C.blue, 12, a); };
+        if (runA) { for (let n = 0; n < 16; n++) { const te = n * .5; if (te > FAIL) break; emit(te, t >= FAIL ? clamp(1 - (t - FAIL) / .5) : 1); } }
+        if (runB) { for (let n = 0; n < 12; n++) emit(RES + n * .5, 1); }
+        // barrier
+        const bu = (t - 4.0) / DUR; if (bu >= 0 && bu <= 1) { const [bx] = along(path, bu); c.save(); c.shadowColor = C.violet; c.shadowBlur = 24; ln(c, bx, 120, bx, 290, C.violet, 6); c.restore(); T(c, 'barrier', bx, 108, { s: 15, c: '#c4b5fd', mono: true }); }
+        // snapshot arrows
+        const snap = (x, t0, col) => { const u = seg(t, t0, t0 + .5); if (u <= 0 || u >= 1) return; const [sx, sy] = along([[x, 262], [x, 330], [x < 800 ? 700 : 1000, 330]], u); dot(c, sx, sy, 6, col, 16); };
+        snap(135, 4.0, C.cyan); snap(AGGX, 5.6, C.violet);
+        // restore arrows
+        if (t >= 9.4 && t < REST) { const u = seg(t, 9.4, REST); [[700, 135], [1000, AGGX]].forEach(([sx, tx]) => { const [qx, qy] = along([[sx, 330], [tx, 300], [tx, 262]], u); dot(c, qx, qy, 7, C.green, 18); }); T(c, 'restore state + offset', 870, 300, { s: 16, c: C.green, mono: true }); }
+        // coordinator failure detect
+        if (failed) chip(c, 'TaskManager lost · خرابی شناسایی شد', 870, 120, C.red, { glow: true, s: 18 });
+        if (restarting && t > 9.0) chip(c, 'restart from chk-1', 870, 120, C.amber, { s: 18 });
+        // banner
+        const msg = ['', 'اجرای عادی: رکوردها جریان دارند و state به‌روز می‌شود', 'Checkpoint: barrier در جریان رکوردها حرکت می‌کند و هر عملگر state خود را snapshot می‌گیرد', 'خرابی: یکی از وظایف از کار افتاد؛ پردازش متوقف می‌شود', 'بازیابی: state و offset از آخرین checkpoint موفق بازگردانی می‌شود', 'ادامه: پردازش از offset ذخیره‌شده ادامه می‌یابد؛ state بدون شمارش مجدد سازگار است'][ph];
+        const col = ph === 3 ? C.red : ph === 4 ? C.amber : ph === 5 ? C.green : ph === 2 ? C.violet : C.cyan;
+        box(c, 40, 488, 1640, 0.1, { stroke: null });
+        T(c, msg, 860, 478, { s: 22, c: col, w: 700 });
+      }
+    };
+  };
+
+  /* ------------------------------------------------------------------ 12 · KAFKA + FLINK */
+  D.kafka = () => {
+    const PER = 14, GAP = .34, PY = [130, 232, 334, 436];
+    const SEQ = [1, 3, 0, 2, 1, 1, 3, 0, 2, 3, 2, 0, 1, 3];
+    const PROD = [[70, 180], [70, 280], [70, 380]];
+    const KX0 = 330, KX1 = 800;
+    const agg = [[1170, 190], [1170, 380]];
+    return {
+      period: PER,
+      draw(c, t) {
+        // producers
+        ['Web app', 'Mobile', 'IoT sensors'].forEach((s, i) => { box(c, 20, PROD[i][1] - 34, 160, 68, { r: 14, stroke: rgba(KEYC[i], .6) }); T(c, s, 100, PROD[i][1], { s: 19, w: 600 }); });
+        T(c, 'Producers', 100, 100, { s: 16, c: C.mute, mono: true });
+        // kafka
+        box(c, 290, 70, 540, 430, { r: 24, fill: 'rgba(8,24,40,.4)', stroke: rgba(C.amber, .45), dash: [8, 8] }); T(c, 'Kafka topic · orders', 560, 94, { s: 19, w: 700, c: C.amber, glow: C.amber, gb: 6 });
+        PY.forEach((y, p) => { box(c, KX0, y - 24, KX1 - KX0, 48, { r: 12, fill: 'rgba(30,22,6,.5)', stroke: rgba(C.amber, .3) }); T(c, 'P' + p, KX0 - 26, y, { s: 16, c: C.mute, mono: true }); });
+        // flink
+        box(c, 880, 70, 560, 430, { r: 24, fill: 'rgba(30,20,60,.35)', stroke: rgba(C.violet, .6), glow: C.violet, gb: 14 }); T(c, 'Flink job', 1160, 94, { s: 19, w: 700, c: '#c4b5fd' });
+        PY.forEach((y, p) => { box(c, 905, y - 26, 120, 52, { r: 12, stroke: rgba(C.cyan, .55) }); T(c, 'source ' + p, 965, y, { s: 15, c: C.cyan, mono: true }); ln(c, KX1, y, 905, y, 'rgba(251,191,36,.25)', 2, [4, 5]); });
+        agg.forEach(([x, y], i) => { box(c, x - 80, y - 46, 160, 92, { r: 16, stroke: rgba(KEYC[i + 1], .7) }); T(c, 'window · agg', x, y - 12, { s: 18, w: 700 }); T(c, 'subtask ' + i, x, y + 18, { s: 14, c: C.mute, mono: true }); });
+        PY.forEach((y, p) => agg.forEach(([x, ay]) => poly(c, [[1025, y], [x - 80, ay]], 'rgba(139,92,246,.13)', 1.5)));
+        T(c, 'keyBy', 1090, 480, { s: 15, c: C.violet, mono: true });
+        // sinks
+        box(c, 1480, 100, 220, 120, { r: 18, stroke: rgba(C.amber, .6) }); T(c, 'Kafka topic', 1590, 142, { s: 19, w: 700 }); T(c, 'results', 1590, 176, { s: 16, c: C.mute, mono: true });
+        box(c, 1480, 300, 220, 120, { r: 18, stroke: rgba(C.green, .6) }); T(c, 'Dashboard / DB', 1590, 342, { s: 19, w: 700 }); T(c, 'serving', 1590, 376, { s: 16, c: C.mute, mono: true });
+        agg.forEach(([x, y]) => { poly(c, [[x + 80, y], [1480, 160]], 'rgba(52,211,153,.18)', 1.5); poly(c, [[x + 80, y], [1480, 360]], 'rgba(52,211,153,.18)', 1.5); });
+        // flow
+        const cnt = [0, 0, 0, 0];
+        for (let n = 0; n < 40; n++) {
+          const te = .3 + n * GAP, p = SEQ[n % SEQ.length], pr = n % 3, k = (n * 7 + p) % 2; if (te > t) break;
+          const col = KEYC[p];
+          const tA = te + .7, tB = tA + .35, tC = tB + .75, tD = tC + .75;
+          if (t >= tA) cnt[p] = Math.min(10, cnt[p] + 1);
+          let pos = null, s = 14, cc = col;
+          if (t < tA) pos = along([[180, PROD[pr][1]], [330, PY[p]]], (t - te) / .7);
+          else if (t >= tB && t < tC) pos = along([[KX1, PY[p]], [965, PY[p]]], clamp((t - tB) / .3));
+          else if (t >= tC && t < tD) pos = along([[1025, PY[p]], [agg[k][0] - 80, agg[k][1]]], (t - tC) / .75);
+          else if (t >= tD && t < tD + .9) { s = 12; cc = C.green; pos = along([[agg[k][0] + 80, agg[k][1]], [1480, k ? 360 : 160]], (t - tD) / .9); }
+          if (pos) sq(c, pos[0], pos[1], s, cc, 12);
+        }
+        // log cells
+        const per = [0, 0, 0, 0]; for (let n = 0; n < 40; n++) { const te = .3 + n * GAP; if (te + .7 > t) break; per[SEQ[n % SEQ.length]]++; }
+        PY.forEach((y, p) => { const m = per[p], vis = Math.min(m, 12); for (let i = 0; i < vis; i++) { const off = m - vis + i; sq(c, KX0 + 28 + i * 38, y, 26, rgba(KEYC[p], .8), 6); T(c, String(off), KX0 + 28 + i * 38, y, { s: 12, c: '#04101f', mono: true, w: 800 }); } if (m) T(c, 'offset ' + (m - 1), KX1 - 6, y - 36, { s: 12, c: C.mute, a: 'right', mono: true }); });
+        // checkpoint pulse
+        const ck = t % 5; if (ck > 3.4 && ck < 4.6) { const u = (ck - 3.4) / 1.2; chip(c, 'checkpoint · offsets saved', 1160, 530, C.violet, { glow: true, s: 16 }); ring(c, 1160 + 0, 285, 40 + 220 * u, C.violet, .35 * (1 - u), 2); }
+        else T(c, 'offsetها همراه state در checkpoint ذخیره می‌شوند', 1160, 530, { s: 15, c: C.mute });
+        T(c, 'پارتیشن‌ها ← subtaskهای source', 560, 530, { s: 15, c: C.mute });
+      }
+    };
+  };
+
+  /* ------------------------------------------------------------------ D · FRAUD DETECTION */
+  D.fraud = () => {
+    const PER = 16;
+    // [t, card, amount, city, flag]
+    const TX = [[.6, '1042', 18.4, 'Berlin'], [1.6, '7731', 212, 'Paris'], [2.6, '4821', 39.99, 'London'], [3.6, '1042', 64.1, 'Berlin'], [4.6, '4821', 410, 'Singapore'], [5.6, '9915', 12.3, 'Madrid'], [6.6, '4821', 980, 'New York', 1], [7.6, '7731', 23, 'Paris'], [8.8, '3308', 7450, 'Dubai', 2], [10.0, '1042', 22, 'Berlin'], [11.0, '9915', 41.5, 'Madrid'], [12.0, '7731', 58.2, 'Paris']];
+    const PY = 190, X = { src: 40, parse: 240, key: 440, rule: 640, sink: 900 };
+    const money = v => '$' + v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const FL = { 1: 'velocity + geo mismatch', 2: 'amount anomaly' };
+    return {
+      period: PER,
+      draw(c, t) {
+        box(c, 10, 10, 1140, 620, { r: 24, fill: 'rgba(6,10,28,.45)', stroke: 'rgba(120,150,255,.14)' });
+        const gl = x => { let m = 0; TX.forEach(([te]) => { const u = (t - te) / 3; if (u < 0 || u > 1) return; m = Math.max(m, 1 - Math.abs(lerp(X.src + 100, X.sink, u) - x) / 90); }); return clamp(m); };
+        poly(c, [[X.src + 100, PY], [X.sink, PY]], 'rgba(34,211,238,.22)', 3);
+        const ops = [['Source', 'transactions', X.src, 100, C.cyan, 'src'], ['Parse', '& enrich', X.parse, 150, C.blue, 'parse'], ['keyBy', 'card', X.key, 150, C.violet, 'key'], ['Fraud rules', 'keyed state', X.rule, 200, C.red, 'rule']];
+        let alertNow = null; TX.forEach(([te, , , , f]) => { if (f && t >= te + 2.4) alertNow = [te, f]; });
+        ops.forEach(([a, b, x, w, col]) => { const g = gl(x + w / 2); box(c, x, PY - 52, w, 104, { stroke: rgba(col, .45 + .55 * g), glow: col, gb: 6 + 24 * g }); T(c, a, x + w / 2, PY - 12, { s: 21, w: 700 }); T(c, b, x + w / 2, PY + 20, { s: 14, c: C.mute, mono: true }); });
+        const alertAge = alertNow ? t - (alertNow[0] + 2.4) : 99;
+        box(c, X.sink + 20, PY - 52, 200, 104, { stroke: rgba(C.red, alertAge < 4 ? 1 : .4), glow: alertAge < 4 ? C.red : null, gb: 30, fill: alertAge < 4 ? 'rgba(70,10,25,.7)' : undefined });
+        T(c, 'Alert sink', X.sink + 120, PY - 12, { s: 21, w: 700 }); T(c, 'Kafka · pager', X.sink + 120, PY + 20, { s: 14, c: C.mute, mono: true });
+        // packets
+        TX.forEach(([te, card, amt, city, f]) => {
+          const u = (t - te) / 3; if (u < 0 || u > 1) return; const x = lerp(X.src + 100, X.sink + 20, u);
+          const sus = f && x > X.rule; const col = sus ? C.red : (x > X.key ? C.violet : x > X.parse ? C.blue : C.cyan);
+          sq(c, x, PY, sus ? 24 : 18, col, sus ? 26 : 12); if (sus) ring(c, x, PY, 22 + 8 * Math.sin(t * 10), C.red, .6, 2);
+        });
+        // alert popup
+        if (alertNow && alertAge < 3.8) { const a = clamp(alertAge / .3) * clamp((3.8 - alertAge) / .4), y = lerp(60, 0, ease(clamp(alertAge / .4)));
+          c.save(); c.globalAlpha *= a; box(c, 700, 304 + y - 60, 420, 84, { r: 16, fill: 'rgba(70,10,25,.92)', stroke: C.red, glow: C.red, gb: 30 }); T(c, '🚨 FRAUD ALERT · card ****' + TX.find(x => x[0] === alertNow[0])[1], 910, 326 + y - 60, { s: 22, w: 800, c: '#ffd2da' }); T(c, FL[alertNow[1]], 910, 358 + y - 60, { s: 18, c: C.red, mono: true }); c.restore(); }
+        // keyed state table
+        const cards = {}; TX.forEach(([te, card, amt, city]) => { if (t >= te + 1.7) { const s = cards[card] = cards[card] || { n: 0, avg: 0, city: '', cities: new Set() }; s.avg = (s.avg * s.n + amt) / (s.n + 1); s.n++; s.city = city; s.cities.add(city); } });
+        T(c, 'Keyed state per card', 40, 296, { s: 19, w: 700, c: '#c4b5fd', a: 'left' });
+        T(c, 'card      txns   avg        last geo', 40, 328, { s: 14, c: C.dim, a: 'left', mono: true });
+        ['1042', '7731', '4821', '9915', '3308'].forEach((k, i) => { const s = cards[k]; const hot = k === '4821' && s && s.cities.size >= 3 || k === '3308' && s && s.n >= 1 && s.avg > 1000;
+          if (hot) box(c, 30, 340 + i * 30, 560, 28, { r: 8, fill: 'rgba(251,113,133,.12)', stroke: rgba(C.red, .5) });
+          T(c, s ? `****${k}   ${String(s.n).padEnd(5)} ${money(s.avg).padEnd(10)} ${s.city}` : `****${k}   —`, 40, 354 + i * 30, { s: 16, a: 'left', mono: true, c: hot ? C.red : C.ink }); });
+        // ticker
+        T(c, 'Live transactions', 40, 520, { s: 17, w: 700, c: C.cyan, a: 'left' });
+        const seen = TX.filter(x => t >= x[0] + 1.2).slice(-3).reverse();
+        seen.forEach(([te, card, amt, city, f], r) => { const sus = f && t >= te + 2.4; T(c, `${money(amt).padStart(9)}  ****${card}  ${city}`, 40, 556 + r * 28, { s: 16, a: 'left', mono: true, c: sus ? C.red : '#cfe0ff', alpha: 1 - r * .22 }); if (sus) chip(c, 'SUSPICIOUS', 560, 556 + r * 28, C.red, { s: 12 }); });
+        T(c, 'Rules: ≥3 countries in 10s · amount ≫ card average', 1130, 596, { s: 13, c: C.dim, a: 'right', mono: true });
+      }
+    };
+  };
+})(window);
+
+</script>
+<script>
+/* ==========================================================
+   main.js — navigation, intro animations (GSAP), UI chrome.
+   Slide structure lives in index.html, styles in css/, and the
+   canvas demos in js/demos*.js — this file only wires them up.
+   ========================================================== */
+(function (g) {
+  'use strict';
+  const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+  const fa = n => String(n).replace(/\d/g, d => '۰۱۲۳۴۵۶۷۸۹'[d]);
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const hasGsap = !!g.gsap;
+
+  /* ---------- icons ---------- */
+  const icons = () => { try { g.lucide && g.lucide.createIcons(); } catch (e) { /* offline: icons are decorative */ } };
+  icons();
+
+  /* ---------- kinetic typography: split headings into words ----------
+     Consecutive non-Arabic words stay together in one LTR run so that
+     English phrases ("Apache Flink") keep their order inside RTL text. */
+  const AR = /[\u0600-\u06FF]/;
+  function wrapRuns(text, parent, gradClass) {
+    const toks = text.split(/(\s+)/).filter(Boolean), runs = []; let cur = null;
+    toks.forEach(t => {
+      if (/^\s+$/.test(t)) { if (cur) cur.pending = (cur.pending || '') + ' '; else runs.push({ sp: true }); return; }
+      const latin = !AR.test(t);
+      if (cur && cur.latin && latin) { cur.text += (cur.pending || ' ') + t; cur.pending = ''; return; }
+      if (cur) { runs.push(cur); runs.push({ sp: true }); }
+      cur = { text: t, latin, pending: '' };
+    });
+    if (cur) runs.push(cur);
+    if (/\s$/.test(text)) runs.push({ sp: true });
+    runs.forEach(r => {
+      if (r.sp) { parent.appendChild(document.createTextNode(' ')); return; }
+      const w = document.createElement('span'); w.className = 'w';
+      const i = document.createElement('span'); i.className = 'wi' + (gradClass ? ' grad' : ''); i.textContent = r.text; if (r.latin) i.dir = 'ltr';
+      w.appendChild(i); parent.appendChild(w);
+    });
+  }
+  $$('[data-split]').forEach(h => {
+    const walk = node => {
+      Array.from(node.childNodes).forEach(n => {
+        if (n.nodeType === 3) {
+          if (!n.textContent.trim()) return;
+          const frag = document.createDocumentFragment(); wrapRuns(n.textContent, frag, false); node.replaceChild(frag, n);
+        } else if (n.nodeType === 1 && !n.classList.contains('w')) {
+          if (n.classList.contains('grad')) { const t = n.textContent; n.textContent = ''; n.classList.remove('grad'); wrapRuns(t, n, true); }
+          else walk(n);
+        }
+      });
+    };
+    walk(h);
+  });
+  // architecture step list: keep each item's text in a single flex child
+  $$('.arch-steps li').forEach(li => { const s = document.createElement('span'); while (li.firstChild) s.appendChild(li.firstChild); li.appendChild(s); });
+
+  /* ---------- intro animation (GSAP, WAAPI fallback) ---------- */
+  const running = new WeakMap();
+  function intro(slide) {
+    const words = $$('.wi', slide), items = $$('[data-in]', slide);
+    (running.get(slide) || []).forEach(a => a.kill && a.kill());
+    const list = [];
+    if (reduce) { words.concat(items).forEach(e => { e.style.opacity = 1; e.style.transform = ''; }); return; }
+    if (hasGsap) {
+      const isHero = slide.id === 's-open' || slide.id === 's-end';
+      if (words.length) list.push(gsap.fromTo(words, { yPercent: 115, rotate: 4, opacity: 0 }, { yPercent: 0, rotate: 0, opacity: 1, duration: isHero ? 1.1 : .8, ease: 'expo.out', stagger: isHero ? .12 : .06, delay: .1, clearProps: 'transform' }));
+      if (items.length) list.push(gsap.fromTo(items, { y: 34, opacity: 0, scale: .98 }, { y: 0, opacity: 1, scale: 1, duration: .8, ease: 'power3.out', stagger: .09, delay: .3, clearProps: 'transform' }));
+    } else {
+      words.forEach((w, i) => w.animate([{ transform: 'translateY(115%)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 800, delay: 100 + i * 70, easing: 'cubic-bezier(.16,1,.3,1)', fill: 'both' }));
+      items.forEach((w, i) => w.animate([{ transform: 'translateY(34px)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 800, delay: 300 + i * 90, easing: 'cubic-bezier(.22,1,.36,1)', fill: 'both' }));
+    }
+    running.set(slide, list);
+  }
+
+  /* ---------- slide lifecycle ---------- */
+  const D = g.FlinkDemos;
+  let ftBound = false, timerStart = 0;
+  function enter(slide) {
+    if (!slide) return;
+    intro(slide);
+    D && D.activate(slide);
+    if (slide.id === 's-arch') g.FlinkArch && g.FlinkArch.start();
+    if (slide.id === 's-ft' && !ftBound) { ftBound = true; const cv = $('canvas', slide); cv.addEventListener('phase', e => $$('#ftSteps li').forEach(li => { const s = +li.dataset.s; li.classList.toggle('on', s === e.detail); li.classList.toggle('bad', s === 3); })); }
+    if (slide.id === 's-ft') $$('#ftSteps li').forEach(li => li.classList.remove('on'));
+    if (slide.id === 's-dist') { const cv = $('canvas', slide), d = cv && cv.__demo, on = $('#parSeg .on'); if (d && on) d.setPar(+on.dataset.par); }
+    updateUI();
+  }
+  function leave(slide) {
+    if (!slide) return;
+    D && D.deactivate();
+    if (slide.id === 's-arch') g.FlinkArch && g.FlinkArch.stop();
+  }
+
+  /* ---------- UI ---------- */
+  const R = g.Reveal, total = () => R.getTotalSlides();
+  const counter = $('#counter'), bar = $('#progress span');
+  function updateUI() {
+    const i = R.getIndices().h, n = total();
+    counter.textContent = fa(i + 1) + ' / ' + fa(n);
+    bar.style.width = ((i + 1) / n * 100) + '%';
+    $$('#overview button').forEach((b, k) => b.classList.toggle('cur', k === i));
+  }
+  function buildOverview() {
+    const ov = $('#overview'); ov.innerHTML = '<h5>نمای کلی اسلایدها · برای انتخاب کلیک کنید · Esc برای بستن</h5><div class="ov-grid"></div>';
+    const grid = $('.ov-grid', ov);
+    R.getSlides().forEach((s, i) => { const b = document.createElement('button'); b.innerHTML = `<span class="n">${String(i + 1).padStart(2, '0')}</span><span class="t">${s.dataset.title || ''}</span>`; b.onclick = () => { toggleOverview(false); R.slide(i); }; grid.appendChild(b); });
+  }
+  function toggleOverview(force) {
+    const ov = $('#overview'), show = force == null ? ov.hidden : force; ov.hidden = !show; if (show) updateUI();
+  }
+  function fullscreen() { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen && document.documentElement.requestFullscreen().catch(() => {}); }
+  function setPaused(p) {
+    D.paused = p; document.body.classList.toggle('paused', p); g.FlinkArch && g.FlinkArch.setPaused(p); g.FlinkBG && (p ? g.FlinkBG.pause() : g.FlinkBG.resume());
+    const b = $('#btnPause'); b.innerHTML = `<i data-lucide="${p ? 'play' : 'pause'}"></i>`; icons();
+  }
+
+  $('#btnNext').onclick = () => R.next(); $('#btnPrev').onclick = () => R.prev();
+  $('#btnOverview').onclick = () => toggleOverview(); $('#btnFull').onclick = fullscreen;
+  $('#btnRestart').onclick = () => { D.restart(); const s = R.getCurrentSlide(); intro(s); if (s.id === 's-arch') g.FlinkArch.start(); };
+  $('#btnPause').onclick = () => setPaused(!D.paused);
+
+  // key handling (capture so it wins over the engine's defaults for these keys)
+  addEventListener('keydown', e => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const k = e.key.toLowerCase(), ov = !$('#overview').hidden;
+    const eat = fn => { e.preventDefault(); e.stopPropagation(); fn(); };
+    if (k === 'escape' && ov) return eat(() => toggleOverview(false));
+    if (k === 'f') return eat(fullscreen);
+    if (k === 'o') return eat(() => toggleOverview());
+    if (k === 'r') return eat(() => $('#btnRestart').click());
+    if (k === 'p' && !e.shiftKey) return eat(() => setPaused(!D.paused));
+    if (k === 'b') return eat(() => document.body.classList.toggle('blackout'));
+    if (ov && /^arrow|^page| /.test(k)) e.stopPropagation();
+  }, true);
+
+  // distributed demo: parallelism selector
+  $$('#parSeg button').forEach(b => b.onclick = () => {
+    $$('#parSeg button').forEach(x => x.classList.toggle('on', x === b));
+    const d = $('#s-dist canvas').__demo; d && d.setPar(+b.dataset.par);
+  });
+
+  // auto-hide chrome
+  let idleT; const wake = () => { document.body.classList.remove('idle'); clearTimeout(idleT); idleT = setTimeout(() => document.body.classList.add('idle'), 3500); };
+  ['pointermove', 'pointerdown', 'keydown'].forEach(ev => addEventListener(ev, wake, { passive: true })); wake();
+
+  // presentation timer
+  setInterval(() => { const s = Math.floor((Date.now() - timerStart) / 1000); $('#timer').textContent = String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); }, 1000);
+
+  /* ---------- boot ---------- */
+  D && D.init();
+  const cfg = { width: 1920, height: 1080, margin: .02, minScale: .15, maxScale: 2.2, center: false, hash: true, rtl: true, controls: false, progress: false, slideNumber: false, overview: false, transition: 'fade', transitionSpeed: 'slow', backgroundTransition: 'fade', display: 'flex', keyboard: true, touch: true, mouseWheel: false, help: false, fragments: false, autoAnimate: false };
+  R.on('ready', e => { buildOverview(); timerStart = Date.now(); enter(e.currentSlide); });
+  R.on('slidechanged', e => { leave(e.previousSlide); enter(e.currentSlide); });
+  const p = R.initialize(cfg);
+  document.documentElement.dataset.engine = R.isMini ? 'mini' : 'reveal';
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) D && (D.last = performance.now()); });
+  g.__flinkReady = true;
+})(window);
+
+</script>
+</body>
+</html>

@@ -56,9 +56,26 @@ export function detectSlideStaticDimensions(
   const source = `${css}\n${html}`;
   if (!source.trim()) return null;
 
-  // 1. Check CSS rule blocks targeting known slide root selectors
+  // 0. Check explicit Slideino stage metadata (e.g. from Reveal.js standalone import)
+  const stageAttrMatch = html.match(
+    /(?:data-slideino-stage|name=["']slideino-stage["'][^>]*content)\s*=\s*["'](\d{3,4})x(\d{3,4})["']/i
+  );
+  if (stageAttrMatch) {
+    const width = Math.round(Number(stageAttrMatch[1]));
+    const height = Math.round(Number(stageAttrMatch[2]));
+    if (
+      width >= MIN_AUTO_W &&
+      width <= MAX_AUTO_W &&
+      height >= MIN_AUTO_H &&
+      height <= MAX_AUTO_H
+    ) {
+      return { width, height };
+    }
+  }
+
+  // 1. Check CSS rule blocks targeting known slide root selectors (including Reveal.js .slides)
   const cssRuleRegex =
-    /(?:^|[\s},])(html|body|\.slide-container|\.slide-canvas|\.presentation-slide|\.slide|#slide|\[data-slide[^\]]*\])[^{]*\{([^}]{1,1200})\}/gi;
+    /(?:^|[\s},])(html|body|\.slides|\.slide-container|\.slide-canvas|\.presentation-slide|\.slide|#slide|\[data-slide[^\]]*\])[^{]*\{([^}]{1,1200})\}/gi;
   let match: RegExpExecArray | null;
   let best: { width: number; height: number } | null = null;
   while ((match = cssRuleRegex.exec(source)) !== null) {
@@ -77,6 +94,25 @@ export function detectSlideStaticDimensions(
     checked += 1;
     const pair = extractPxPair(match[2]);
     if (pair) return pair;
+  }
+
+  // 3. Check Reveal.js JS configuration dimensions (e.g. Reveal.initialize({ width: 1920, height: 1080 }))
+  if (/\bReveal\b/i.test(html)) {
+    const revealDimMatch = html.match(
+      /\bwidth\s*:\s*(\d{3,4})\b[\s\S]{0,160}?\bheight\s*:\s*(\d{3,4})\b/
+    );
+    if (revealDimMatch) {
+      const width = Math.round(Number(revealDimMatch[1]));
+      const height = Math.round(Number(revealDimMatch[2]));
+      if (
+        width >= MIN_AUTO_W &&
+        width <= MAX_AUTO_W &&
+        height >= MIN_AUTO_H &&
+        height <= MAX_AUTO_H
+      ) {
+        return { width, height };
+      }
+    }
   }
 
   return null;
@@ -431,6 +467,216 @@ function buildStandaloneOverrideCss(
   return parts.join('\n');
 }
 
+function buildSingleSlideRevealShimScript(): string {
+  return `<script data-slideino-reveal-shim="true">
+(function(g) {
+  'use strict';
+  // Sandbox-safe History API guard (prevents SecurityError in opaque about:srcdoc iframes)
+  try {
+    if (g.history) {
+      var origReplace = g.history.replaceState && g.history.replaceState.bind(g.history);
+      var origPush = g.history.pushState && g.history.pushState.bind(g.history);
+      if (origReplace) {
+        g.history.replaceState = function() {
+          try { return origReplace.apply(g.history, arguments); } catch (_) {}
+        };
+      }
+      if (origPush) {
+        g.history.pushState = function() {
+          try { return origPush.apply(g.history, arguments); } catch (_) {}
+        };
+      }
+    }
+  } catch (_) {}
+
+  // Early capture-phase keyboard bridge so Slideino host presentation shortcuts win over deck-level capture listeners
+  g.addEventListener('keydown', function(e) {
+    if (typeof g.__slideinoHandleKeyDown === 'function') {
+      g.__slideinoHandleKeyDown(e);
+    }
+  }, true);
+
+  // Lightweight single-slide Reveal.js API shim (zero CDN wait, exact 1:1 stage fit inside Slideino)
+  var listeners = {};
+  var cfg = { width: 1920, height: 1080, display: 'flex', margin: 0, center: false, hash: false };
+  var plugins = {};
+  var slides = [];
+  var ready = false;
+  var initialized = false;
+
+  function scanSlides() {
+    var root = document.querySelector('.reveal .slides, .reveal > .slides');
+    if (!root) { slides = []; return slides; }
+    var top = Array.prototype.filter.call(root.children, function(el) {
+      return el.tagName === 'SECTION';
+    });
+    var flat = [];
+    top.forEach(function(sec) {
+      var nested = Array.prototype.filter.call(sec.children, function(el) {
+        return el.tagName === 'SECTION';
+      });
+      if (nested.length > 0) flat = flat.concat(nested);
+      else flat.push(sec);
+    });
+    slides = flat;
+    return slides;
+  }
+
+  function activateCurrentSlide() {
+    scanSlides();
+    var revealEl = document.querySelector('.reveal');
+    if (revealEl) revealEl.classList.add('ready');
+    var cur = slides[0];
+    if (!cur) return null;
+    cur.classList.remove('past', 'future', 'leaving');
+    cur.classList.add('present', 'show');
+    var computed = g.getComputedStyle ? g.getComputedStyle(cur) : null;
+    var wantedDisplay = cfg.display;
+    if (!wantedDisplay) {
+      wantedDisplay = (computed && computed.flexDirection && computed.flexDirection !== 'row')
+        ? 'flex'
+        : 'block';
+    }
+    if (!cur.style.display || (computed && computed.display === 'none')) {
+      cur.style.display = wantedDisplay;
+    }
+    return cur;
+  }
+
+  var R = {
+    VERSION: '5.1.0',
+    isMini: false,
+    on: function(n, f) {
+      if (typeof f !== 'function') return;
+      (listeners[n] = listeners[n] || []).push(f);
+    },
+    off: function(n, f) {
+      if (!listeners[n]) return;
+      listeners[n] = listeners[n].filter(function(cb) { return cb !== f; });
+    },
+    addEventListener: function(n, f) { R.on(n, f); },
+    removeEventListener: function(n, f) { R.off(n, f); },
+    emit: function(n, d) {
+      (listeners[n] || []).slice().forEach(function(f) {
+        try { f(d || {}); } catch (_) {}
+      });
+    },
+    getScale: function() { return 1; },
+    getConfig: function() { return Object.assign({}, cfg); },
+    configure: function(next) { if (next && typeof next === 'object') Object.assign(cfg, next); },
+    getTotalSlides: function() { return slides.length || 1; },
+    getIndices: function() { return { h: 0, v: 0, f: undefined }; },
+    getCurrentSlide: function() { return slides[0] || scanSlides()[0] || null; },
+    getSlides: function() { return slides.length ? slides.slice() : scanSlides().slice(); },
+    getProgress: function() { return 0; },
+    isReady: function() { return ready; },
+    isFirstSlide: function() { return true; },
+    isLastSlide: function() { return true; },
+    layout: function() { R.emit('resize', { scale: 1 }); },
+    sync: function() { activateCurrentSlide(); },
+    slide: function() { activateCurrentSlide(); },
+    next: function() {},
+    prev: function() {},
+    left: function() {},
+    right: function() {},
+    up: function() {},
+    down: function() {},
+    registerPlugin: function(id, plugin) {
+      if (typeof id === 'string' && plugin) plugins[id] = plugin;
+      else if (id && id.id) plugins[id.id] = id;
+    },
+    getPlugins: function() { return plugins; },
+    hasPlugin: function(id) { return Boolean(plugins[id]); },
+    getPlugin: function(id) { return plugins[id] || null; },
+    initialize: function(userCfg) {
+      initialized = true;
+      if (userCfg && typeof userCfg === 'object') {
+        Object.assign(cfg, userCfg);
+      }
+      var cur = activateCurrentSlide();
+      if (Array.isArray(cfg.plugins)) {
+        cfg.plugins.forEach(function(p) {
+          try {
+            var inst = typeof p === 'function' ? p() : p;
+            if (inst && inst.id) plugins[inst.id] = inst;
+            if (inst && typeof inst.init === 'function') inst.init(R);
+          } catch (_) {}
+        });
+      }
+      ready = true;
+      R.emit('ready', { currentSlide: cur, indexh: 0, indexv: 0 });
+      return Promise.resolve(R);
+    }
+  };
+
+  g.Reveal = R;
+
+  // Fallback for CSS-only Reveal.js decks that never call Reveal.initialize()
+  document.addEventListener('DOMContentLoaded', function() {
+    if (!initialized) {
+      activateCurrentSlide();
+      ready = true;
+    }
+  });
+})(window);
+</script>`;
+}
+
+function buildSingleSlideRevealCss(): string {
+  return `<style data-slideino-reveal-single-css="true">
+html[data-slideino-reveal-single="true"],
+html[data-slideino-reveal-single="true"] body {
+  width: 100% !important;
+  height: 100% !important;
+  margin: 0 !important;
+  overflow: hidden !important;
+}
+html[data-slideino-reveal-single="true"] body.idle {
+  cursor: auto !important;
+}
+html[data-slideino-reveal-single="true"] .reveal {
+  width: 100% !important;
+  height: 100% !important;
+  position: relative !important;
+  overflow: hidden !important;
+}
+html[data-slideino-reveal-single="true"] .reveal .slides {
+  position: relative !important;
+  inset: 0 !important;
+  left: 0 !important;
+  top: 0 !important;
+  right: auto !important;
+  bottom: auto !important;
+  width: 100% !important;
+  height: 100% !important;
+  margin: 0 !important;
+  transform: none !important;
+  pointer-events: auto !important;
+}
+html[data-slideino-reveal-single="true"] .reveal .slides > section {
+  position: relative !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
+  transform: none !important;
+}
+html[data-slideino-reveal-single="true"] #toolbar,
+html[data-slideino-reveal-single="true"] #progress,
+html[data-slideino-reveal-single="true"] #overview,
+html[data-slideino-reveal-single="true"] #rotate,
+html[data-slideino-reveal-single="true"] .reveal > .controls,
+html[data-slideino-reveal-single="true"] .reveal > .progress,
+html[data-slideino-reveal-single="true"] .reveal > .slide-number,
+html[data-slideino-reveal-single="true"] .reveal > .pause-overlay {
+  display: none !important;
+  pointer-events: none !important;
+}
+</style>`;
+}
+
 function buildRuntimeBootstrapScript(
   instanceId: string,
   theme: SlideTheme,
@@ -438,7 +684,8 @@ function buildRuntimeBootstrapScript(
   isThumbnail: boolean,
   editMode: boolean,
   autoSize: boolean,
-  autoBaseDims?: { width: number; height: number }
+  autoBaseDims?: { width: number; height: number },
+  isSingleReveal = false
 ): string {
   const safeId = JSON.stringify(instanceId);
   const mermaidTheme = theme.isDark ? 'dark' : 'neutral';
@@ -453,6 +700,7 @@ function buildRuntimeBootstrapScript(
   var AUTO_SIZE = ${autoSize ? 'true' : 'false'};
   var AUTO_BASE_W = ${Math.round(baseW)};
   var AUTO_BASE_H = ${Math.round(baseH)};
+  var IS_SINGLE_REVEAL = ${isSingleReveal ? 'true' : 'false'};
 
   function postHost(type, payload) {
     try {
@@ -473,16 +721,26 @@ function buildRuntimeBootstrapScript(
   });
 
   if (!IS_THUMBNAIL && !EDIT_MODE) {
-    window.addEventListener('keydown', function(e) {
+    var forwardKeys = ['ArrowRight', 'ArrowLeft', 'ArrowUp', 'ArrowDown', ' ', 'PageDown', 'PageUp', 'Home', 'End', 'Escape', 'f', 'F', 'g', 'G', 'n', 'N', 'b', 'B', 'l', 'L', 'p', 'P', 'h', 'H', 'a', 'A', 'r', 'R', 'e', 'E', 'c', 'C', 'v', 'V', 't', 'T', 'o', 'O', '?'];
+    var handleKeyForward = function(e) {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
       var tag = (e.target && e.target.tagName || '').toLowerCase();
       if (tag === 'input' || tag === 'textarea' || tag === 'select' || (e.target && e.target.isContentEditable)) {
         return;
       }
-      var forwardKeys = ['ArrowRight', 'ArrowLeft', 'ArrowUp', 'ArrowDown', ' ', 'PageDown', 'PageUp', 'Home', 'End', 'Escape', 'f', 'F', 'g', 'G', 'n', 'N', 'b', 'B', 'l', 'L', 'p', 'P', 'h', 'H', 'a', 'A', 'r', 'R', 'e', 'E', 'c', 'C', 'v', 'V', 't', 'T', 'o', 'O', '?'];
       if (forwardKeys.indexOf(e.key) !== -1) {
         postHost('keydown', { key: e.key, shiftKey: !!e.shiftKey });
+        if (IS_SINGLE_REVEAL) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+        }
       }
-    });
+    };
+    if (IS_SINGLE_REVEAL) {
+      window.__slideinoHandleKeyDown = handleKeyForward;
+    } else {
+      window.addEventListener('keydown', handleKeyForward);
+    }
   }
 
   function hydrateLibraries() {
@@ -571,23 +829,26 @@ function buildRuntimeBootstrapScript(
         : ''
     }
 
-    // 6. GSAP thumbnail & reduced-motion fast-forward so slides never freeze invisible
-    ${
-      libraries.gsap
-        ? `try {
+    // 6. GSAP & Web Animations thumbnail / reduced-motion fast-forward (works for both managed & standalone slides)
+    try {
       var reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      if ((IS_THUMBNAIL || reducedMotion) && window.gsap && window.gsap.globalTimeline) {
-        window.gsap.globalTimeline.timeScale(1000);
-        window.gsap.globalTimeline.progress(1);
-        setTimeout(function() {
-          if (window.gsap && window.gsap.globalTimeline) {
-            window.gsap.globalTimeline.progress(1);
-          }
-        }, 120);
+      if (IS_THUMBNAIL || reducedMotion) {
+        if (window.gsap && window.gsap.globalTimeline) {
+          window.gsap.globalTimeline.timeScale(1000);
+          window.gsap.globalTimeline.progress(1);
+          setTimeout(function() {
+            if (window.gsap && window.gsap.globalTimeline) {
+              window.gsap.globalTimeline.progress(1);
+            }
+          }, 120);
+        }
+        if (document.getAnimations) {
+          document.getAnimations().forEach(function(anim) {
+            try { anim.finish(); } catch (_) {}
+          });
+        }
       }
-    } catch (_) {}`
-        : ''
-    }
+    } catch (_) {}
   }
 
   var lastReportedW = AUTO_BASE_W;
@@ -616,7 +877,7 @@ function buildRuntimeBootstrapScript(
   }
 
   function measureAndReportSize() {
-    if (!AUTO_SIZE) return;
+    if (!AUTO_SIZE || IS_SINGLE_REVEAL) return;
     if (document.documentElement && document.documentElement.classList.contains('__sl_dragging__')) {
       return;
     }
@@ -719,8 +980,20 @@ function buildRuntimeBootstrapScript(
     measureTimer = setTimeout(measureAndReportSize, delay || 40);
   }
 
+  var thumbnailFrozen = false;
+  function freezeThumbnailLoops() {
+    if (!IS_THUMBNAIL || thumbnailFrozen) return;
+    thumbnailFrozen = true;
+    try {
+      window.requestAnimationFrame = function() { return 0; };
+    } catch (_) {}
+  }
+
   function onReady() {
     setTimeout(hydrateLibraries, 20);
+    if (IS_THUMBNAIL) {
+      setTimeout(freezeThumbnailLoops, 2400);
+    }
     if (AUTO_SIZE) {
       scheduleMeasure(40);
       setTimeout(measureAndReportSize, 220);
@@ -745,6 +1018,9 @@ function buildRuntimeBootstrapScript(
   window.addEventListener('load', function() {
     hydrateLibraries();
     scheduleMeasure(50);
+    if (IS_THUMBNAIL) {
+      setTimeout(freezeThumbnailLoops, 900);
+    }
   });
 })();
 </script>`;
@@ -811,6 +1087,12 @@ export function buildSlideDocument(options: BuildSlideOptions): string {
   const sharedStyleTag = sharedCss?.trim()
     ? `<style data-slideino-shared="true">${escapeStyleClose(sharedCss)}</style>`
     : '';
+  const isSingleReveal =
+    isFullDocument &&
+    (/data-slideino-reveal-single\s*=\s*["']true["']/i.test(processedHtml) ||
+      (/class=["'][^"']*\breveal\b[^"']*["']/i.test(processedHtml) &&
+        /class=["'][^"']*\bslides\b[^"']*["']/i.test(processedHtml)));
+
   const runtimeScript = buildRuntimeBootstrapScript(
     instanceId,
     theme,
@@ -818,7 +1100,8 @@ export function buildSlideDocument(options: BuildSlideOptions): string {
     isThumbnail,
     activeEditMode,
     autoSize,
-    autoBaseDims
+    autoBaseDims,
+    isSingleReveal
   );
   const visualEditorScript = activeEditMode
     ? buildVisualEditorInjection(instanceId, isFullDocument)
@@ -826,12 +1109,16 @@ export function buildSlideDocument(options: BuildSlideOptions): string {
 
   if (isFullDocument) {
     let doc = processedHtml;
+    if (isSingleReveal && !/data-slideino-reveal-single\s*=\s*["']true["']/i.test(doc)) {
+      doc = doc.replace(/<html([^>]*)>/i, '<html$1 data-slideino-reveal-single="true">');
+    }
     const basePrefix = [
+      isSingleReveal ? buildSingleSlideRevealShimScript() : '',
       `<style data-slideino-tokens="true">${escapeStyleClose(
         buildRootVariablesCss(theme, slide)
       )}</style>`,
       sharedStyleTag,
-      revealCompatTag,
+      isSingleReveal ? '' : revealCompatTag,
     ]
       .filter(Boolean)
       .join('\n');
@@ -839,6 +1126,7 @@ export function buildSlideDocument(options: BuildSlideOptions): string {
     const overrideSuffix = [
       autoFontLink,
       headTags,
+      isSingleReveal ? buildSingleSlideRevealCss() : '',
       `<style data-slideino-overrides="true">${escapeStyleClose(
         buildStandaloneOverrideCss(slide, prefersReducedMotion, isThumbnail)
       )}</style>`,
@@ -846,7 +1134,7 @@ export function buildSlideDocument(options: BuildSlideOptions): string {
       .filter(Boolean)
       .join('\n');
 
-    // Inject tokens + shared fonts at the beginning of <head> so the slide's own styles take priority
+    // Inject shim + tokens + shared fonts at the beginning of <head> so the slide's own styles take priority
     if (/<head[^>]*>/i.test(doc)) {
       doc = doc.replace(/<head[^>]*>/i, (match) => `${match}\n${basePrefix}`);
     } else if (/<html[^>]*>/i.test(doc)) {
