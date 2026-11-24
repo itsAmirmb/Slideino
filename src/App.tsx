@@ -37,6 +37,7 @@ import { DeckManager } from './components/DeckManager';
 import { ImportModal } from './components/ImportModal';
 import { ExportPresentationModal } from './components/ExportPresentationModal';
 import { PresentationMode } from './components/PresentationMode';
+import { parseAudienceUrlParams } from './utils/presentationSync';
 
 function formatByteSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -45,14 +46,28 @@ function formatByteSize(bytes: number): string {
 }
 
 export default function App() {
+  const audienceParams = useMemo(() => parseAudienceUrlParams(), []);
+
   const [decks, setDecks] = useState<Deck[]>(() => loadDecks());
-  const [activeDeckId, setActiveDeckId] = useState<string>(() => loadActiveDeckId(loadDecks()));
+  const [activeDeckId, setActiveDeckId] = useState<string>(() => {
+    const initialDecks = loadDecks();
+    if (
+      audienceParams.isAudienceView &&
+      audienceParams.deckId &&
+      initialDecks.some((d) => d.id === audienceParams.deckId)
+    ) {
+      return audienceParams.deckId;
+    }
+    return loadActiveDeckId(initialDecks);
+  });
   const [customThemes, setCustomThemes] = useState<SlideTheme[]>(() => loadCustomThemes());
   const [uiDarkMode, setUiDarkMode] = useState<boolean>(() => loadUiDarkMode());
 
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('studio');
-  const [activeSlideIndex, setActiveSlideIndex] = useState(0);
-  const [presenting, setPresenting] = useState(false);
+  const [activeSlideIndex, setActiveSlideIndex] = useState(() =>
+    audienceParams.isAudienceView ? audienceParams.slideIndex : 0
+  );
+  const [presenting, setPresenting] = useState(() => audienceParams.isAudienceView);
   const [importModalState, setImportModalState] = useState<{
     open: boolean;
     mode: 'import' | 'prompt';
@@ -72,20 +87,40 @@ export default function App() {
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', uiDarkMode);
-    saveUiDarkMode(uiDarkMode);
-  }, [uiDarkMode]);
+    if (!audienceParams.isAudienceView) {
+      saveUiDarkMode(uiDarkMode);
+    }
+  }, [uiDarkMode, audienceParams.isAudienceView]);
 
+  // Avoid overwriting Studio decks from a read-only Audience Window; instead listen for updates
   useEffect(() => {
+    if (audienceParams.isAudienceView) return;
     saveDecks(decks);
-  }, [decks]);
+  }, [decks, audienceParams.isAudienceView]);
 
   useEffect(() => {
+    if (audienceParams.isAudienceView) return;
     saveActiveDeckId(activeDeckId);
-  }, [activeDeckId]);
+  }, [activeDeckId, audienceParams.isAudienceView]);
 
   useEffect(() => {
+    if (audienceParams.isAudienceView) return;
     saveCustomThemes(customThemes);
-  }, [customThemes]);
+  }, [customThemes, audienceParams.isAudienceView]);
+
+  useEffect(() => {
+    if (!audienceParams.isAudienceView) return;
+    const onStorage = (e: StorageEvent) => {
+      if (!e.key || e.key.includes('decks')) {
+        setDecks(loadDecks());
+      }
+      if (!e.key || e.key.includes('themes')) {
+        setCustomThemes(loadCustomThemes());
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, [audienceParams.isAudienceView]);
 
   const allThemes = useMemo(() => getAllThemes(customThemes), [customThemes]);
 
@@ -98,6 +133,16 @@ export default function App() {
     () => allThemes.find((t) => t.id === activeDeck.themeId) || allThemes[0],
     [allThemes, activeDeck.themeId]
   );
+
+  // Set clear browser tab title for Audience Window so it is effortless to spot in Zoom/Meet share pickers
+  useEffect(() => {
+    if (!audienceParams.isAudienceView) return;
+    const prev = document.title;
+    document.title = `Audience View — ${activeDeck.title}`;
+    return () => {
+      document.title = prev;
+    };
+  }, [audienceParams.isAudienceView, activeDeck.title]);
 
   // Keep slide index within bounds when deck changes
   useEffect(() => {
@@ -599,17 +644,32 @@ export default function App() {
         onExport={handleConfirmExportPresentation}
       />
 
-      {presenting && (
+      {audienceParams.isAudienceView ? (
         <PresentationMode
           deck={activeDeck}
           theme={activeTheme}
           initialSlideIndex={activeSlideIndex}
-          onExportPresentation={() => handleOpenExportModal(activeDeck)}
-          onExit={(lastIndex) => {
-            setPresenting(false);
-            setActiveSlideIndex(lastIndex);
+          viewRole="audience"
+          syncSessionId={audienceParams.syncId || `deck-${activeDeck.id}`}
+          onExit={() => {
+            // Audience window stays clean on stage; pressing Escape only exits fullscreen/overlays
           }}
         />
+      ) : (
+        presenting && (
+          <PresentationMode
+            deck={activeDeck}
+            theme={activeTheme}
+            initialSlideIndex={activeSlideIndex}
+            viewRole="presenter"
+            syncSessionId={`deck-${activeDeck.id}`}
+            onExportPresentation={() => handleOpenExportModal(activeDeck)}
+            onExit={(lastIndex) => {
+              setPresenting(false);
+              setActiveSlideIndex(lastIndex);
+            }}
+          />
+        )
       )}
 
       {/* Accessible Toast Notification */}

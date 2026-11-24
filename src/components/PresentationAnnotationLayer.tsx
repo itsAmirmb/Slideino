@@ -50,6 +50,11 @@ interface LaserTrailPoint {
   time: number;
 }
 
+export interface RemoteLaserHandle {
+  pushPoint: (normX: number, normY: number, color: string) => void;
+  hide: () => void;
+}
+
 interface PresentationAnnotationLayerProps {
   tool: AnnotationTool;
   color: string;
@@ -58,6 +63,8 @@ interface PresentationAnnotationLayerProps {
   annotations: AnnotationStroke[];
   onCommitStroke: (stroke: AnnotationStroke) => void;
   onEraseStrokeIds: (ids: string[]) => void;
+  onLaserMove?: (pos: { active: boolean; x: number; y: number; color: string }) => void;
+  remoteLaserRef?: React.MutableRefObject<RemoteLaserHandle | null>;
 }
 
 const LASER_TRAIL_LIFETIME_MS = 460;
@@ -239,6 +246,8 @@ const PresentationAnnotationLayerImpl: React.FC<PresentationAnnotationLayerProps
   annotations,
   onCommitStroke,
   onEraseStrokeIds,
+  onLaserMove,
+  remoteLaserRef,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const drawCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -255,8 +264,12 @@ const PresentationAnnotationLayerImpl: React.FC<PresentationAnnotationLayerProps
   toolRef.current = tool;
   const laserColorRef = useRef<string>(laserColor);
   laserColorRef.current = laserColor;
+  const activeLaserColorRef = useRef<string>(laserColor);
   const annotationsRef = useRef(annotations);
   annotationsRef.current = annotations;
+  const onLaserMoveRef = useRef(onLaserMove);
+  onLaserMoveRef.current = onLaserMove;
+  const lastEmitLaserTsRef = useRef(0);
 
   const laserTrailRef = useRef<LaserTrailPoint[]>([]);
   const laserRafRef = useRef<number | null>(null);
@@ -336,7 +349,7 @@ const PresentationAnnotationLayerImpl: React.FC<PresentationAnnotationLayerProps
     ctx.clearRect(0, 0, width, height);
 
     if (trail.length >= 2) {
-      const strokeColor = laserColorRef.current;
+      const strokeColor = activeLaserColorRef.current || laserColorRef.current;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
 
@@ -425,9 +438,18 @@ const PresentationAnnotationLayerImpl: React.FC<PresentationAnnotationLayerProps
   }, [annotations, renderDrawCanvas]);
 
   useEffect(() => {
+    activeLaserColorRef.current = laserColor;
+    if (laserDotRef.current) {
+      laserDotRef.current.style.background = `radial-gradient(circle, #ffffff 0%, #ffffff 32%, ${laserColor} 58%, transparent 100%)`;
+      laserDotRef.current.style.boxShadow = `0 0 14px 4px ${laserColor}, 0 0 28px 8px ${laserColor}66`;
+    }
+  }, [laserColor]);
+
+  useEffect(() => {
     if (tool !== 'laser') {
       clearLaserCanvas();
       if (laserDotRef.current) laserDotRef.current.style.opacity = '0';
+      onLaserMoveRef.current?.({ active: false, x: 0, y: 0, color: laserColorRef.current });
     }
     if (tool !== 'eraser' && eraserCursorRef.current) {
       eraserCursorRef.current.style.opacity = '0';
@@ -453,27 +475,65 @@ const PresentationAnnotationLayerImpl: React.FC<PresentationAnnotationLayerProps
     };
   };
 
-  const pushLaserPoint = (px: number, py: number, now: number) => {
-    const trail = laserTrailRef.current;
-    const last = trail[trail.length - 1];
-    if (!last || Math.hypot(px - last.x, py - last.y) >= 2) {
-      trail.push({ x: px, y: py, time: now });
-      if (trail.length > LASER_MAX_POINTS) {
-        trail.shift();
+  const pushLaserPoint = useCallback(
+    (px: number, py: number, now: number) => {
+      const trail = laserTrailRef.current;
+      const last = trail[trail.length - 1];
+      if (!last || Math.hypot(px - last.x, py - last.y) >= 2) {
+        trail.push({ x: px, y: py, time: now });
+        if (trail.length > LASER_MAX_POINTS) {
+          trail.shift();
+        }
+        ensureLaserLoop();
       }
-      ensureLaserLoop();
-    }
-  };
+    },
+    [ensureLaserLoop]
+  );
 
-  const updateLaserDot = (px: number, py: number, visible: boolean) => {
+  const updateLaserDot = useCallback((px: number, py: number, visible: boolean, overrideColor?: string) => {
     const dot = laserDotRef.current;
     if (!dot) return;
     if (!visible) {
       dot.style.opacity = '0';
       return;
     }
+    if (overrideColor && overrideColor !== activeLaserColorRef.current) {
+      activeLaserColorRef.current = overrideColor;
+      dot.style.background = `radial-gradient(circle, #ffffff 0%, #ffffff 32%, ${overrideColor} 58%, transparent 100%)`;
+      dot.style.boxShadow = `0 0 14px 4px ${overrideColor}, 0 0 28px 8px ${overrideColor}66`;
+    }
     dot.style.opacity = '1';
     dot.style.transform = `translate3d(${px}px, ${py}px, 0)`;
+  }, []);
+
+  // Expose zero-rerender imperative API so Audience Window can render synced laser at 60fps
+  useEffect(() => {
+    if (!remoteLaserRef) return;
+    remoteLaserRef.current = {
+      pushPoint: (normX: number, normY: number, remoteColor: string) => {
+        const { width, height } = sizeRef.current;
+        if (width <= 0 || height <= 0) return;
+        const px = Math.max(0, Math.min(width, normX * width));
+        const py = Math.max(0, Math.min(height, normY * height));
+        updateLaserDot(px, py, true, remoteColor);
+        pushLaserPoint(px, py, performance.now());
+      },
+      hide: () => {
+        updateLaserDot(0, 0, false);
+      },
+    };
+    return () => {
+      remoteLaserRef.current = null;
+    };
+  }, [remoteLaserRef, pushLaserPoint, updateLaserDot]);
+
+  const emitLaserMove = (normX: number, normY: number, active: boolean) => {
+    const cb = onLaserMoveRef.current;
+    if (!cb) return;
+    const now = performance.now();
+    if (active && now - lastEmitLaserTsRef.current < 16) return;
+    lastEmitLaserTsRef.current = now;
+    cb({ active, x: normX, y: normY, color: laserColorRef.current });
   };
 
   const updateEraserCursor = (px: number, py: number, visible: boolean) => {
@@ -513,8 +573,9 @@ const PresentationAnnotationLayerImpl: React.FC<PresentationAnnotationLayerProps
     if (!pos) return;
 
     if (currentTool === 'laser') {
-      updateLaserDot(pos.px, pos.py, true);
+      updateLaserDot(pos.px, pos.py, true, laserColorRef.current);
       pushLaserPoint(pos.px, pos.py, performance.now());
+      emitLaserMove(pos.norm.x, pos.norm.y, true);
       return;
     }
 
@@ -552,7 +613,7 @@ const PresentationAnnotationLayerImpl: React.FC<PresentationAnnotationLayerProps
       const now = performance.now();
 
       if (coalesced && coalesced.length > 0) {
-        let lastPos: { px: number; py: number } | null = null;
+        let lastPos: { px: number; py: number; norm: NormalizedPoint } | null = null;
         for (let i = 0; i < coalesced.length; i++) {
           const p = toLocalPoint(coalesced[i].clientX, coalesced[i].clientY);
           if (p) {
@@ -561,13 +622,15 @@ const PresentationAnnotationLayerImpl: React.FC<PresentationAnnotationLayerProps
           }
         }
         if (lastPos) {
-          updateLaserDot(lastPos.px, lastPos.py, true);
+          updateLaserDot(lastPos.px, lastPos.py, true, laserColorRef.current);
+          emitLaserMove(lastPos.norm.x, lastPos.norm.y, true);
         }
       } else {
         const pos = toLocalPoint(e.clientX, e.clientY);
         if (pos) {
-          updateLaserDot(pos.px, pos.py, true);
+          updateLaserDot(pos.px, pos.py, true, laserColorRef.current);
           pushLaserPoint(pos.px, pos.py, now);
+          emitLaserMove(pos.norm.x, pos.norm.y, true);
         }
       }
       return;
@@ -636,6 +699,9 @@ const PresentationAnnotationLayerImpl: React.FC<PresentationAnnotationLayerProps
   const handlePointerLeave = () => {
     if (laserDotRef.current) laserDotRef.current.style.opacity = '0';
     if (eraserCursorRef.current) eraserCursorRef.current.style.opacity = '0';
+    if (toolRef.current === 'laser') {
+      emitLaserMove(0, 0, false);
+    }
   };
 
   const finishInteraction = (e?: React.PointerEvent<HTMLDivElement>) => {
@@ -647,6 +713,7 @@ const PresentationAnnotationLayerImpl: React.FC<PresentationAnnotationLayerProps
     if (currentTool === 'laser') {
       if (e && e.pointerType !== 'mouse' && laserDotRef.current) {
         laserDotRef.current.style.opacity = '0';
+        emitLaserMove(0, 0, false);
       }
       return;
     }

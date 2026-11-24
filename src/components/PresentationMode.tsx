@@ -1,18 +1,22 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowUpRight,
+  Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   ChevronUp,
   Clock,
+  Copy,
   Download,
   Eraser,
+  ExternalLink,
   Grid,
   HelpCircle,
   Highlighter,
   Maximize2,
   Minimize2,
+  Monitor,
   MonitorOff,
   NotebookPen,
   Pause,
@@ -34,12 +38,21 @@ import {
   AnnotationTool,
   LASER_COLORS,
   PresentationAnnotationLayer,
+  RemoteLaserHandle,
 } from './PresentationAnnotationLayer';
+import {
+  buildAudienceWindowUrl,
+  createPresentationSyncBridge,
+  PresentationSyncBridge,
+  SyncWindowRole,
+} from '../utils/presentationSync';
 
 interface PresentationModeProps {
   deck: Deck;
   theme: SlideTheme;
   initialSlideIndex: number;
+  viewRole?: SyncWindowRole;
+  syncSessionId?: string;
   onExit: (lastIndex: number) => void;
   onExportPresentation?: () => void;
 }
@@ -99,9 +112,14 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
   deck,
   theme,
   initialSlideIndex,
+  viewRole = 'presenter',
+  syncSessionId,
   onExit,
   onExportPresentation,
 }) => {
+  const isAudienceMode = viewRole === 'audience';
+  const effectiveSyncId = syncSessionId || `deck-${deck.id}`;
+
   const activeSlides = deck.slides.filter((s) => !s.hidden);
   const slides = activeSlides.length > 0 ? activeSlides : deck.slides;
 
@@ -117,6 +135,10 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
   const [toolbarHidden, setToolbarHidden] = useState(false);
   const [toolOptionsHidden, setToolOptionsHidden] = useState(false);
   const [noteFontSize, setNoteFontSize] = useState(16);
+  const [syncedAudienceCount, setSyncedAudienceCount] = useState(0);
+  const [syncedPresenterCount, setSyncedPresenterCount] = useState(0);
+  const [copiedAudienceLink, setCopiedAudienceLink] = useState(false);
+  const [showAudienceBanner, setShowAudienceBanner] = useState(isAudienceMode);
 
   // Annotation & laser pointer state (stored per slide so navigating preserves drawings)
   const [activeTool, setActiveTool] = useState<AnnotationTool>('pointer');
@@ -138,7 +160,16 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
   activeToolRef.current = activeTool;
   const touchStartXRef = useRef<number | null>(null);
 
+  // Dual-window sync refs
+  const syncBridgeRef = useRef<PresentationSyncBridge | null>(null);
+  const remoteLaserRef = useRef<RemoteLaserHandle | null>(null);
+  const currentIndexRef = useRef(currentIndex);
+  currentIndexRef.current = currentIndex;
+  const blackoutRef = useRef(blackout);
+  blackoutRef.current = blackout;
   const currentSlide = slides[currentIndex] || slides[0];
+  const currentSlideIdRef = useRef(currentSlide.id);
+  currentSlideIdRef.current = currentSlide.id;
   const nextSlide = slides[currentIndex + 1] || null;
   const currentAnnotations = useMemo(
     () => annotationsBySlide[currentSlide.id] || [],
@@ -146,21 +177,61 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
   );
   const canUndoAnnotation = (undoHistoryBySlide[currentSlide.id]?.length || 0) > 0;
 
+  const audienceUrl = useMemo(
+    () => buildAudienceWindowUrl(deck.id, effectiveSyncId, currentIndex),
+    [deck.id, effectiveSyncId, currentIndex]
+  );
+
+  // Auto-hide the brief Audience setup banner after 4.5s so listeners never see it
+  useEffect(() => {
+    if (!isAudienceMode || !showAudienceBanner) return;
+    const id = window.setTimeout(() => setShowAudienceBanner(false), 4500);
+    return () => window.clearTimeout(id);
+  }, [isAudienceMode, showAudienceBanner]);
+
+  const broadcastState = useCallback(
+    (nextIndex: number, nextBlackout: boolean, nextAnnotations?: Record<string, AnnotationStroke[]>) => {
+      syncBridgeRef.current?.send({
+        type: 'state',
+        state: {
+          slideIndex: nextIndex,
+          blackout: nextBlackout,
+          ...(nextAnnotations ? { annotationsBySlide: nextAnnotations } : {}),
+        },
+      });
+    },
+    []
+  );
+
   const goTo = useCallback(
     (index: number) => {
       const clamped = Math.max(0, Math.min(slides.length - 1, index));
       setCurrentIndex(clamped);
       setBlackout(false);
+      if (isAudienceMode) setShowAudienceBanner(false);
+      broadcastState(clamped, false);
     },
-    [slides.length]
+    [slides.length, isAudienceMode, broadcastState]
   );
 
   const step = useCallback(
     (delta: number) => {
-      setCurrentIndex((prev) => Math.max(0, Math.min(slides.length - 1, prev + delta)));
+      const next = Math.max(0, Math.min(slides.length - 1, currentIndexRef.current + delta));
+      setCurrentIndex(next);
       setBlackout(false);
+      if (isAudienceMode) setShowAudienceBanner(false);
+      broadcastState(next, false);
     },
-    [slides.length]
+    [slides.length, isAudienceMode, broadcastState]
+  );
+
+  const toggleBlackout = useCallback(
+    (force?: boolean) => {
+      const next = typeof force === 'boolean' ? force : !blackoutRef.current;
+      setBlackout(next);
+      broadcastState(currentIndexRef.current, next);
+    },
+    [broadcastState]
   );
 
   const toggleFullscreen = useCallback(() => {
@@ -172,10 +243,14 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
   }, []);
 
   useEffect(() => {
-    const onFsChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    const onFsChange = () => {
+      const fs = Boolean(document.fullscreenElement);
+      setIsFullscreen(fs);
+      if (fs && isAudienceMode) setShowAudienceBanner(false);
+    };
     document.addEventListener('fullscreenchange', onFsChange);
     return () => document.removeEventListener('fullscreenchange', onFsChange);
-  }, []);
+  }, [isAudienceMode]);
 
   const bumpControls = useCallback((force = false) => {
     if (toolbarHiddenRef.current) return;
@@ -263,20 +338,98 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
   const undoHistoryBySlideRef = useRef(undoHistoryBySlide);
   undoHistoryBySlideRef.current = undoHistoryBySlide;
 
+  // Establish dual-window real-time sync channel (BroadcastChannel + localStorage fallback)
+  useEffect(() => {
+    const bridge = createPresentationSyncBridge({
+      syncId: effectiveSyncId,
+      role: viewRole,
+      onPeersChange: (audCount, presCount) => {
+        setSyncedAudienceCount(audCount);
+        setSyncedPresenterCount(presCount);
+      },
+      onMessage: (msg) => {
+        if (msg.type === 'hello' && viewRole === 'presenter') {
+          // Immediately push full authoritative state to newly opened Audience Window
+          bridge.send({
+            type: 'state',
+            state: {
+              slideIndex: currentIndexRef.current,
+              blackout: blackoutRef.current,
+              annotationsBySlide: annotationsBySlideRef.current,
+            },
+          });
+          return;
+        }
+        if (msg.type === 'state') {
+          const clamped = Math.max(0, Math.min(slides.length - 1, msg.state.slideIndex));
+          setCurrentIndex(clamped);
+          setBlackout(Boolean(msg.state.blackout));
+          if (msg.state.annotationsBySlide) {
+            setAnnotationsBySlide(msg.state.annotationsBySlide);
+          }
+          if (isAudienceMode) {
+            setShowAudienceBanner(false);
+          }
+          return;
+        }
+        if (msg.type === 'laser') {
+          if (msg.laser.active && msg.laser.slideId === currentSlideIdRef.current) {
+            remoteLaserRef.current?.pushPoint(msg.laser.x, msg.laser.y, msg.laser.color);
+          } else {
+            remoteLaserRef.current?.hide();
+          }
+        }
+      },
+    });
+    syncBridgeRef.current = bridge;
+    return () => {
+      bridge.close();
+      syncBridgeRef.current = null;
+    };
+  }, [effectiveSyncId, viewRole, slides.length, isAudienceMode]);
+
+  const handleLaserMove = useCallback(
+    (pos: { active: boolean; x: number; y: number; color: string }) => {
+      syncBridgeRef.current?.send({
+        type: 'laser',
+        laser: {
+          active: pos.active,
+          x: pos.x,
+          y: pos.y,
+          color: pos.color,
+          slideId: currentSlideIdRef.current,
+        },
+      });
+    },
+    []
+  );
+
+  const handleCopyAudienceLink = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(audienceUrl);
+      setCopiedAudienceLink(true);
+      window.setTimeout(() => setCopiedAudienceLink(false), 2000);
+    } catch {
+      // Ignore clipboard permission errors
+    }
+  }, [audienceUrl]);
+
   const handleCommitStroke = useCallback(
     (stroke: AnnotationStroke) => {
       const slideId = currentSlide.id;
       const current = annotationsBySlideRef.current[slideId] || [];
+      const nextMap = {
+        ...annotationsBySlideRef.current,
+        [slideId]: [...current, stroke],
+      };
       setUndoHistoryBySlide((hPrev) => ({
         ...hPrev,
         [slideId]: [...(hPrev[slideId] || []).slice(-29), current],
       }));
-      setAnnotationsBySlide((prev) => ({
-        ...prev,
-        [slideId]: [...(prev[slideId] || []), stroke],
-      }));
+      setAnnotationsBySlide(nextMap);
+      broadcastState(currentIndexRef.current, blackoutRef.current, nextMap);
     },
-    [currentSlide.id]
+    [currentSlide.id, broadcastState]
   );
 
   const handleEraseStrokeIds = useCallback(
@@ -287,16 +440,18 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
       const current = annotationsBySlideRef.current[slideId] || [];
       const filtered = current.filter((s) => !idSet.has(s.id));
       if (filtered.length === current.length) return;
+      const nextMap = {
+        ...annotationsBySlideRef.current,
+        [slideId]: filtered,
+      };
       setUndoHistoryBySlide((hPrev) => ({
         ...hPrev,
         [slideId]: [...(hPrev[slideId] || []).slice(-29), current],
       }));
-      setAnnotationsBySlide((prev) => ({
-        ...prev,
-        [slideId]: (prev[slideId] || []).filter((s) => !idSet.has(s.id)),
-      }));
+      setAnnotationsBySlide(nextMap);
+      broadcastState(currentIndexRef.current, blackoutRef.current, nextMap);
     },
-    [currentSlide.id]
+    [currentSlide.id, broadcastState]
   );
 
   const handleUndoAnnotation = useCallback(() => {
@@ -304,32 +459,36 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
     const stack = undoHistoryBySlideRef.current[slideId];
     if (!stack || stack.length === 0) return;
     const previousState = stack[stack.length - 1];
+    const nextMap = { ...annotationsBySlideRef.current, [slideId]: previousState };
     setUndoHistoryBySlide((hPrev) => ({
       ...hPrev,
       [slideId]: (hPrev[slideId] || []).slice(0, -1),
     }));
-    setAnnotationsBySlide((aPrev) => ({ ...aPrev, [slideId]: previousState }));
-  }, [currentSlide.id]);
+    setAnnotationsBySlide(nextMap);
+    broadcastState(currentIndexRef.current, blackoutRef.current, nextMap);
+  }, [currentSlide.id, broadcastState]);
 
   const handleClearSlideAnnotations = useCallback(() => {
     const slideId = currentSlide.id;
     const current = annotationsBySlideRef.current[slideId] || [];
     if (current.length === 0) return;
+    const nextMap = { ...annotationsBySlideRef.current, [slideId]: [] };
     setUndoHistoryBySlide((hPrev) => ({
       ...hPrev,
       [slideId]: [...(hPrev[slideId] || []).slice(-29), current],
     }));
-    setAnnotationsBySlide((prev) => ({ ...prev, [slideId]: [] }));
-  }, [currentSlide.id]);
+    setAnnotationsBySlide(nextMap);
+    broadcastState(currentIndexRef.current, blackoutRef.current, nextMap);
+  }, [currentSlide.id, broadcastState]);
 
   const handleKeyAction = useCallback(
     (key: string) => {
       if (key === 'Escape') {
         if (helpOpen) setHelpOpen(false);
         else if (gridOpen) setGridOpen(false);
-        else if (blackout) setBlackout(false);
+        else if (blackout) toggleBlackout(false);
         else if (activeTool !== 'pointer') selectTool('pointer');
-        else onExit(currentIndex);
+        else if (!isAudienceMode) onExit(currentIndex);
         return;
       }
       if (key === 'ArrowRight' || key === ' ' || key === 'PageDown' || key === 'ArrowDown') {
@@ -341,39 +500,44 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
       } else if (key === 'End') {
         goTo(slides.length - 1);
       } else if (key === 'g' || key === 'G') {
-        setGridOpen((v) => !v);
-        setHelpOpen(false);
+        if (!isAudienceMode) {
+          setGridOpen((v) => !v);
+          setHelpOpen(false);
+        }
       } else if (key === 'n' || key === 'N') {
-        setPresenterView((v) => !v);
+        // Never allow Presenter View to open inside a dedicated Audience Window
+        if (!isAudienceMode) {
+          setPresenterView((v) => !v);
+        }
       } else if (key === 'b' || key === 'B') {
-        setBlackout((v) => !v);
+        toggleBlackout();
       } else if (key === 'f' || key === 'F') {
         toggleFullscreen();
       } else if (key === 'l' || key === 'L') {
-        selectTool(activeTool === 'laser' ? 'pointer' : 'laser');
+        if (!isAudienceMode) selectTool(activeTool === 'laser' ? 'pointer' : 'laser');
       } else if (key === 'p' || key === 'P') {
-        selectTool(activeTool === 'pen' ? 'pointer' : 'pen');
+        if (!isAudienceMode) selectTool(activeTool === 'pen' ? 'pointer' : 'pen');
       } else if (key === 'h' || key === 'H') {
-        selectTool(activeTool === 'highlighter' ? 'pointer' : 'highlighter');
+        if (!isAudienceMode) selectTool(activeTool === 'highlighter' ? 'pointer' : 'highlighter');
       } else if (key === 'a' || key === 'A') {
-        selectTool(activeTool === 'arrow' ? 'pointer' : 'arrow');
+        if (!isAudienceMode) selectTool(activeTool === 'arrow' ? 'pointer' : 'arrow');
       } else if (key === 'r' || key === 'R') {
-        selectTool(activeTool === 'rect' ? 'pointer' : 'rect');
+        if (!isAudienceMode) selectTool(activeTool === 'rect' ? 'pointer' : 'rect');
       } else if (key === 'e' || key === 'E') {
-        selectTool(activeTool === 'eraser' ? 'pointer' : 'eraser');
+        if (!isAudienceMode) selectTool(activeTool === 'eraser' ? 'pointer' : 'eraser');
       } else if (key === 'v' || key === 'V') {
-        selectTool('pointer');
+        if (!isAudienceMode) selectTool('pointer');
       } else if (key === 'c' || key === 'C') {
-        handleClearSlideAnnotations();
+        if (!isAudienceMode) handleClearSlideAnnotations();
       } else if (key === 't' || key === 'T') {
         toggleToolbarHidden();
       } else if (key === 'o' || key === 'O') {
-        if (activeTool !== 'pointer') {
+        if (!isAudienceMode && activeTool !== 'pointer') {
           setToolOptionsHidden((v) => !v);
           if (!toolbarHiddenRef.current) bumpControls(true);
         }
       } else if (key === '?') {
-        setHelpOpen((v) => !v);
+        if (!isAudienceMode) setHelpOpen((v) => !v);
       }
     },
     [
@@ -385,10 +549,12 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
       gridOpen,
       handleClearSlideAnnotations,
       helpOpen,
+      isAudienceMode,
       onExit,
       selectTool,
       slides.length,
       step,
+      toggleBlackout,
       toggleFullscreen,
       toggleToolbarHidden,
     ]
@@ -432,16 +598,19 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
   const annotationOverlay = useMemo(
     () => (
       <PresentationAnnotationLayer
-        tool={activeTool}
+        tool={isAudienceMode ? 'pointer' : activeTool}
         color={strokeColor}
         laserColor={laserColor}
         strokeSize={strokeSize}
         annotations={currentAnnotations}
         onCommitStroke={handleCommitStroke}
         onEraseStrokeIds={handleEraseStrokeIds}
+        onLaserMove={isAudienceMode ? undefined : handleLaserMove}
+        remoteLaserRef={remoteLaserRef}
       />
     ),
     [
+      isAudienceMode,
       activeTool,
       strokeColor,
       laserColor,
@@ -449,6 +618,7 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
       currentAnnotations,
       handleCommitStroke,
       handleEraseStrokeIds,
+      handleLaserMove,
     ]
   );
 
@@ -480,17 +650,19 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
         />
       </div>
 
-      {/* Main Presentation Stage or Presenter Split View */}
-      {presenterView ? (
+      {/* Main Presentation Stage or Private Presenter Split View */}
+      {!isAudienceMode && presenterView ? (
         <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 gap-5 p-5 overflow-y-auto">
           <div className="lg:col-span-8 flex flex-col gap-3 min-h-[340px]">
-            <div className="flex items-center justify-between text-xs text-slate-400">
-              <span>Current Slide · {currentSlide.title}</span>
-              <span className="font-mono tabular-nums">
+            <div className="flex items-center justify-between gap-3 text-xs text-slate-400">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="truncate">Current Slide · {currentSlide.title}</span>
+              </div>
+              <span className="font-mono tabular-nums shrink-0">
                 {String(currentIndex + 1).padStart(2, '0')} / {String(slides.length).padStart(2, '0')}
               </span>
             </div>
-            <div className="flex-1 min-h-0 rounded-xl overflow-hidden border border-slate-800 bg-black p-2">
+            <div className="relative flex-1 min-h-0 rounded-xl overflow-hidden border border-slate-800 bg-black p-2">
               <SlideFrame
                 slide={currentSlide}
                 theme={theme}
@@ -501,10 +673,79 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
                 overlay={annotationOverlay}
                 onForwardKey={handleKeyAction}
               />
+              {blackout && (
+                <div
+                  onClick={() => toggleBlackout(false)}
+                  className="absolute inset-0 bg-black/85 z-20 flex flex-col items-center justify-center gap-2 cursor-pointer"
+                >
+                  <MonitorOff className="w-6 h-6 text-slate-400" />
+                  <span className="text-xs font-medium text-slate-200">
+                    Audience screen blacked out
+                  </span>
+                  <span className="text-[11px] text-slate-400">
+                    Press B or click here to resume
+                  </span>
+                </div>
+              )}
             </div>
           </div>
 
-          <div className="lg:col-span-4 flex flex-col gap-4 min-h-0">
+          <div className="lg:col-span-4 flex flex-col gap-3.5 min-h-0">
+            {/* Dual-Screen Audience Window Control */}
+            <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 flex flex-col gap-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  {syncedAudienceCount > 0 ? (
+                    <span
+                      className="w-2 h-2 rounded-full bg-emerald-500 shrink-0"
+                      aria-hidden="true"
+                    />
+                  ) : (
+                    <Monitor className="w-3.5 h-3.5 text-slate-400 shrink-0" aria-hidden="true" />
+                  )}
+                  <span className="text-xs font-medium text-slate-200 truncate">
+                    {syncedAudienceCount > 0
+                      ? syncedAudienceCount === 1
+                        ? 'Audience window synced'
+                        : `${syncedAudienceCount} audience windows synced`
+                      : 'Keep notes private'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCopyAudienceLink}
+                  className="px-2 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-[11px] font-medium text-slate-300 hover:text-white inline-flex items-center gap-1 transition-colors cursor-pointer shrink-0 whitespace-nowrap"
+                  title="Copy Audience Window link"
+                >
+                  {copiedAudienceLink ? (
+                    <>
+                      <Check className="w-3 h-3 text-emerald-400" />
+                      <span>Copied</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3 h-3" />
+                      <span>Copy Link</span>
+                    </>
+                  )}
+                </button>
+              </div>
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                Open a clean slide-only Audience Window for your projector (Extended Display) or share only that tab on Zoom/Meet. Slides, blackout, laser &amp; ink sync live.
+              </p>
+              <a
+                href={audienceUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="h-8 px-3 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium inline-flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                <span>
+                  {syncedAudienceCount > 0 ? 'Open Another Audience Window' : 'Open Audience Window'}
+                </span>
+              </a>
+            </div>
+
             {/* Isolated Presenter Timer (zero stage re-renders on 1s tick) */}
             <PresenterTimer />
 
@@ -533,7 +774,7 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
             </div>
 
             {/* Speaker Notes */}
-            <div className="flex-1 min-h-[180px] p-4 rounded-xl bg-slate-900 border border-slate-800 flex flex-col gap-3 overflow-hidden">
+            <div className="flex-1 min-h-[160px] p-4 rounded-xl bg-slate-900 border border-slate-800 flex flex-col gap-3 overflow-hidden">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-medium text-slate-300">Speaker Notes</span>
                 <div className="flex items-center gap-1">
@@ -565,7 +806,12 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
           </div>
         </div>
       ) : (
-        <div className="flex-1 min-h-0 relative flex items-center justify-center p-2 sm:p-4">
+        <div
+          className="flex-1 min-h-0 relative flex items-center justify-center p-2 sm:p-4"
+          onClick={() => {
+            if (isAudienceMode && showAudienceBanner) setShowAudienceBanner(false);
+          }}
+        >
           <SlideFrame
             slide={currentSlide}
             theme={theme}
@@ -576,12 +822,38 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
             overlay={annotationOverlay}
             onForwardKey={handleKeyAction}
           />
+          {isAudienceMode && showAudienceBanner && !blackout && (
+            <div className="fixed top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 px-4 py-2 rounded-xl bg-slate-900/95 border border-slate-700/80 text-xs text-slate-200 shadow-2xl backdrop-blur-md">
+              <span
+                className={`w-2 h-2 rounded-full shrink-0 ${
+                  syncedPresenterCount > 0 ? 'bg-emerald-500' : 'bg-amber-400'
+                }`}
+                aria-hidden="true"
+              />
+              <span className="whitespace-nowrap">
+                Audience Window {syncedPresenterCount > 0 ? '· Synced with Presenter' : '· Ready'} — Move to projector or share this tab, then press{' '}
+                <strong className="font-mono text-white">F</strong>
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowAudienceBanner(false)}
+                className="p-0.5 rounded text-slate-400 hover:text-white cursor-pointer"
+                aria-label="Dismiss notice"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
           {blackout && (
             <div
-              onClick={() => setBlackout(false)}
+              onClick={() => toggleBlackout(false)}
               className="absolute inset-0 bg-black z-20 flex items-end justify-center pb-8 cursor-pointer"
             >
-              <span className="text-xs text-slate-600">Screen blacked out — press B or click to resume</span>
+              {!isAudienceMode && (
+                <span className="text-xs text-slate-600">
+                  Screen blacked out — press B or click to resume
+                </span>
+              )}
             </div>
           )}
         </div>
@@ -623,7 +895,7 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
         }`}
       >
         {/* 1. Separate Compact Laser Color Bar (collapsible without turning off Laser) */}
-        {isLaserActive && !toolOptionsHidden && (
+        {!isAudienceMode && isLaserActive && !toolOptionsHidden && (
           <div
             role="toolbar"
             aria-label="Laser pointer options"
@@ -676,7 +948,7 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
         )}
 
         {/* 2. Separate Compact Drawing Bar (collapsible without turning off active drawing tool) */}
-        {isDrawingToolActive && !toolOptionsHidden && (
+        {!isAudienceMode && isDrawingToolActive && !toolOptionsHidden && (
           <div
             role="toolbar"
             aria-label="Drawing tools"
@@ -840,90 +1112,122 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
             <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
 
-          <span className="w-px h-4 bg-slate-700 mx-0.5 shrink-0" aria-hidden="true" />
+          {!isAudienceMode && (
+            <>
+              <span className="w-px h-4 bg-slate-700 mx-0.5 shrink-0" aria-hidden="true" />
 
-          {/* Laser Pointer Toggle (separate from drawing) */}
-          <button
-            type="button"
-            onClick={() => selectTool(isLaserActive ? 'pointer' : 'laser')}
-            className={`w-8 h-8 sm:w-9 sm:h-9 inline-flex items-center justify-center rounded-lg transition-colors cursor-pointer shrink-0 ${
-              isLaserActive
-                ? 'bg-red-600 text-white'
-                : 'text-slate-300 hover:bg-slate-800'
-            }`}
-            aria-label="Toggle laser pointer (L)"
-            aria-pressed={isLaserActive}
-            title="Laser Pointer (L)"
-          >
-            <Radio className="w-4 h-4" />
-          </button>
+              {/* Laser Pointer Toggle (separate from drawing) */}
+              <button
+                type="button"
+                onClick={() => selectTool(isLaserActive ? 'pointer' : 'laser')}
+                className={`w-8 h-8 sm:w-9 sm:h-9 inline-flex items-center justify-center rounded-lg transition-colors cursor-pointer shrink-0 ${
+                  isLaserActive
+                    ? 'bg-red-600 text-white'
+                    : 'text-slate-300 hover:bg-slate-800'
+                }`}
+                aria-label="Toggle laser pointer (L)"
+                aria-pressed={isLaserActive}
+                title="Laser Pointer (L)"
+              >
+                <Radio className="w-4 h-4" />
+              </button>
 
-          {/* Drawing Tools Toggle (separate from laser) */}
-          <button
-            type="button"
-            onClick={() => selectTool(isDrawingToolActive ? 'pointer' : lastDrawTool)}
-            className={`w-8 h-8 sm:w-9 sm:h-9 inline-flex items-center justify-center rounded-lg transition-colors cursor-pointer shrink-0 ${
-              isDrawingToolActive
-                ? 'bg-blue-600 text-white'
-                : 'text-slate-300 hover:bg-slate-800'
-            }`}
-            aria-label="Toggle drawing tools (P)"
-            aria-pressed={isDrawingToolActive}
-            title="Draw & Annotate (P)"
-          >
-            <Pen className="w-4 h-4" />
-          </button>
+              {/* Drawing Tools Toggle (separate from laser) */}
+              <button
+                type="button"
+                onClick={() => selectTool(isDrawingToolActive ? 'pointer' : lastDrawTool)}
+                className={`w-8 h-8 sm:w-9 sm:h-9 inline-flex items-center justify-center rounded-lg transition-colors cursor-pointer shrink-0 ${
+                  isDrawingToolActive
+                    ? 'bg-blue-600 text-white'
+                    : 'text-slate-300 hover:bg-slate-800'
+                }`}
+                aria-label="Toggle drawing tools (P)"
+                aria-pressed={isDrawingToolActive}
+                title="Draw & Annotate (P)"
+              >
+                <Pen className="w-4 h-4" />
+              </button>
 
-          {/* Compact Toggle to Re-Expand Hidden Laser / Drawing Options */}
-          {(isLaserActive || isDrawingToolActive) && toolOptionsHidden && (
-            <button
-              type="button"
-              onClick={() => setToolOptionsHidden(false)}
-              className="w-7 h-8 sm:h-9 inline-flex items-center justify-center rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white cursor-pointer shrink-0"
-              aria-label="Show tool options (O)"
-              title={isLaserActive ? 'Show Laser Options (O)' : 'Show Drawing Options (O)'}
-            >
-              <ChevronUp className="w-3.5 h-3.5" />
-            </button>
+              {/* Compact Toggle to Re-Expand Hidden Laser / Drawing Options */}
+              {(isLaserActive || isDrawingToolActive) && toolOptionsHidden && (
+                <button
+                  type="button"
+                  onClick={() => setToolOptionsHidden(false)}
+                  className="w-7 h-8 sm:h-9 inline-flex items-center justify-center rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white cursor-pointer shrink-0"
+                  aria-label="Show tool options (O)"
+                  title={isLaserActive ? 'Show Laser Options (O)' : 'Show Drawing Options (O)'}
+                >
+                  <ChevronUp className="w-3.5 h-3.5" />
+                </button>
+              )}
+
+              <span className="w-px h-4 bg-slate-700 mx-0.5 shrink-0" aria-hidden="true" />
+
+              <button
+                type="button"
+                onClick={() => setPresenterView((v) => !v)}
+                className={`w-8 h-8 sm:w-9 sm:h-9 inline-flex items-center justify-center rounded-lg transition-colors cursor-pointer shrink-0 ${
+                  presenterView ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800'
+                }`}
+                aria-label="Toggle presenter notes view (N)"
+                title="Presenter View (N)"
+              >
+                <NotebookPen className="w-4 h-4" />
+              </button>
+
+              {/* Direct Dual-Window Audience Screen Launcher */}
+              <a
+                href={audienceUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={`relative w-8 h-8 sm:w-9 sm:h-9 inline-flex items-center justify-center rounded-lg transition-colors shrink-0 ${
+                  syncedAudienceCount > 0
+                    ? 'bg-emerald-600/20 text-emerald-300 hover:bg-emerald-600/30'
+                    : 'text-slate-300 hover:bg-slate-800'
+                }`}
+                aria-label="Open synchronized Audience Window"
+                title={
+                  syncedAudienceCount > 0
+                    ? `Audience Window Synced (${syncedAudienceCount}) — Click to open another`
+                    : 'Open Separate Audience Window (Dual Screen)'
+                }
+              >
+                <Monitor className="w-4 h-4" />
+                {syncedAudienceCount > 0 && (
+                  <span
+                    className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-emerald-400"
+                    aria-hidden="true"
+                  />
+                )}
+              </a>
+
+              <button
+                type="button"
+                onClick={() => setGridOpen((v) => !v)}
+                className={`w-8 h-8 sm:w-9 sm:h-9 inline-flex items-center justify-center rounded-lg transition-colors cursor-pointer shrink-0 ${
+                  gridOpen ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800'
+                }`}
+                aria-label="Toggle slide grid overview (G)"
+                title="Slide Grid (G)"
+              >
+                <Grid className="w-4 h-4" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => toggleBlackout()}
+                className={`w-8 h-8 sm:w-9 sm:h-9 inline-flex items-center justify-center rounded-lg transition-colors cursor-pointer shrink-0 ${
+                  blackout ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800'
+                }`}
+                aria-label="Blackout screen (B)"
+                title="Blackout Screen (B)"
+              >
+                <MonitorOff className="w-4 h-4" />
+              </button>
+            </>
           )}
 
           <span className="w-px h-4 bg-slate-700 mx-0.5 shrink-0" aria-hidden="true" />
-
-          <button
-            type="button"
-            onClick={() => setPresenterView((v) => !v)}
-            className={`w-8 h-8 sm:w-9 sm:h-9 inline-flex items-center justify-center rounded-lg transition-colors cursor-pointer shrink-0 ${
-              presenterView ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800'
-            }`}
-            aria-label="Toggle presenter notes view (N)"
-            title="Presenter View (N)"
-          >
-            <NotebookPen className="w-4 h-4" />
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setGridOpen((v) => !v)}
-            className={`w-8 h-8 sm:w-9 sm:h-9 inline-flex items-center justify-center rounded-lg transition-colors cursor-pointer shrink-0 ${
-              gridOpen ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800'
-            }`}
-            aria-label="Toggle slide grid overview (G)"
-            title="Slide Grid (G)"
-          >
-            <Grid className="w-4 h-4" />
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setBlackout((v) => !v)}
-            className={`w-8 h-8 sm:w-9 sm:h-9 inline-flex items-center justify-center rounded-lg transition-colors cursor-pointer shrink-0 ${
-              blackout ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800'
-            }`}
-            aria-label="Blackout screen (B)"
-            title="Blackout Screen (B)"
-          >
-            <MonitorOff className="w-4 h-4" />
-          </button>
 
           <button
             type="button"
@@ -935,17 +1239,19 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
             {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
           </button>
 
-          <button
-            type="button"
-            onClick={() => setHelpOpen((v) => !v)}
-            className="w-8 h-8 sm:w-9 sm:h-9 inline-flex items-center justify-center rounded-lg text-slate-300 hover:bg-slate-800 cursor-pointer shrink-0"
-            aria-label="Keyboard shortcuts (?)"
-            title="Keyboard Shortcuts (?)"
-          >
-            <HelpCircle className="w-4 h-4" />
-          </button>
+          {!isAudienceMode && (
+            <button
+              type="button"
+              onClick={() => setHelpOpen((v) => !v)}
+              className="w-8 h-8 sm:w-9 sm:h-9 inline-flex items-center justify-center rounded-lg text-slate-300 hover:bg-slate-800 cursor-pointer shrink-0"
+              aria-label="Keyboard shortcuts (?)"
+              title="Keyboard Shortcuts (?)"
+            >
+              <HelpCircle className="w-4 h-4" />
+            </button>
+          )}
 
-          {onExportPresentation && (
+          {!isAudienceMode && onExportPresentation && (
             <button
               type="button"
               onClick={() => {
@@ -972,17 +1278,21 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
             <ChevronDown className="w-4 h-4" />
           </button>
 
-          <span className="w-px h-4 bg-slate-700 mx-0.5 shrink-0" aria-hidden="true" />
+          {!isAudienceMode && (
+            <>
+              <span className="w-px h-4 bg-slate-700 mx-0.5 shrink-0" aria-hidden="true" />
 
-          <button
-            type="button"
-            onClick={() => onExit(currentIndex)}
-            className="px-2.5 h-8 sm:h-9 inline-flex items-center gap-1 rounded-lg text-xs font-medium text-slate-200 hover:bg-slate-800 cursor-pointer whitespace-nowrap shrink-0"
-            aria-label="Exit presentation (Escape)"
-          >
-            <X className="w-4 h-4" />
-            <span className="hidden sm:inline">Exit</span>
-          </button>
+              <button
+                type="button"
+                onClick={() => onExit(currentIndex)}
+                className="px-2.5 h-8 sm:h-9 inline-flex items-center gap-1 rounded-lg text-xs font-medium text-slate-200 hover:bg-slate-800 cursor-pointer whitespace-nowrap shrink-0"
+                aria-label="Exit presentation (Escape)"
+              >
+                <X className="w-4 h-4" />
+                <span className="hidden sm:inline">Exit</span>
+              </button>
+            </>
+          )}
         </nav>
       </div>
 
