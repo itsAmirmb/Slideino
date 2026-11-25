@@ -592,7 +592,6 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
       activeTool,
       blackout,
       bumpControls,
-      currentIndex,
       goTo,
       gridOpen,
       handleClearSlideAnnotations,

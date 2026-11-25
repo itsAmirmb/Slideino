@@ -6,6 +6,7 @@ import {
 import {
   buildSlideDocument,
   detectSlideStaticDimensions,
+  detectStandaloneBackdrop,
 } from './slideRuntime';
 
 export interface PresentationExportOptions {
@@ -140,12 +141,19 @@ export async function exportStandalonePresentationHtml(
       autoBaseDims: slideDims,
     });
 
+    const isStandaloneSlide =
+      Boolean(slide.standalone) || /<!doctype\s+html|<html[\s>]/i.test(slide.html || '');
+    const resolvedBg =
+      slide.backgroundOverride?.trim() ||
+      (isStandaloneSlide ? detectStandaloneBackdrop(slide.html, slide.css) : null) ||
+      theme.tokens.bg;
+
     compiledSlides.push({
       id: slide.id,
       title: slide.title,
       notes: options.includePresenterTools ? slide.notes || '' : '',
       transition: slide.transition || deck.defaultTransition || 'fade',
-      bg: slide.backgroundOverride || theme.tokens.bg,
+      bg: resolvedBg,
       width: slideDims.width,
       height: slideDims.height,
       doc,

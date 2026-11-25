@@ -599,8 +599,9 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
   function serializeCleanHtml() {
     if (IS_FULL_DOC) {
       var docClone = document.documentElement.cloneNode(true);
+      docClone.removeAttribute('data-slideino-pending');
       docClone.querySelectorAll(
-        '[data-slideino-editor="true"], [data-slideino-autofont="true"], [data-slideino-tokens="true"], [data-slideino-shared="true"], [data-slideino-overrides="true"], [data-slideino-theme="true"], [data-slideino-runtime="true"], [data-slideino-reveal="true"], [data-slideino-reveal-shim="true"], [data-slideino-reveal-single-css="true"], #__slideino_editor_overlay__'
+        '[data-slideino-paint-gate="true"], [data-slideino-editor="true"], [data-slideino-autofont="true"], [data-slideino-tokens="true"], [data-slideino-shared="true"], [data-slideino-overrides="true"], [data-slideino-theme="true"], [data-slideino-runtime="true"], [data-slideino-reveal="true"], [data-slideino-reveal-shim="true"], [data-slideino-reveal-single-css="true"], #__slideino_editor_overlay__'
       ).forEach(function(n) { n.remove(); });
       stripEditorAttrs(docClone);
       return '<!doctype html>\\n' + docClone.outerHTML;
@@ -608,7 +609,7 @@ html.__sl_edit_mode__ .__sl_handle__[data-h="w"]  { top: calc(50% - 5px); left: 
 
     var bodyClone = document.body.cloneNode(true);
     bodyClone.querySelectorAll(
-      '[data-slideino-editor="true"], [data-slideino-autofont="true"], [data-slideino-runtime="true"], [data-slideino-reveal="true"], [data-slideino-reveal-shim="true"], [data-slideino-reveal-single-css="true"], #__slideino_editor_overlay__'
+      '[data-slideino-paint-gate="true"], [data-slideino-editor="true"], [data-slideino-autofont="true"], [data-slideino-runtime="true"], [data-slideino-reveal="true"], [data-slideino-reveal-shim="true"], [data-slideino-reveal-single-css="true"], #__slideino_editor_overlay__'
     ).forEach(function(n) { n.remove(); });
     stripEditorAttrs(bodyClone);
     return bodyClone.innerHTML.trim();

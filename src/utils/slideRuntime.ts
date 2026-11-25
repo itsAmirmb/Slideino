@@ -677,6 +677,11 @@ html[data-slideino-reveal-single="true"] .reveal > .pause-overlay {
 </style>`;
 }
 
+function buildPaintGateHeadTags(): string {
+  return `<style data-slideino-paint-gate="true">html[data-slideino-pending="true"] body{opacity:0 !important;pointer-events:none !important;}</style>
+<script data-slideino-paint-gate="true">(function(){var r=document.documentElement;r.setAttribute('data-slideino-pending','true');window.__slPaintGateTimer=setTimeout(function(){r.removeAttribute('data-slideino-pending');},4500);})();</script>`;
+}
+
 function buildRuntimeBootstrapScript(
   instanceId: string,
   theme: SlideTheme,
@@ -685,7 +690,8 @@ function buildRuntimeBootstrapScript(
   editMode: boolean,
   autoSize: boolean,
   autoBaseDims?: { width: number; height: number },
-  isSingleReveal = false
+  isSingleReveal = false,
+  expectsTailwind = false
 ): string {
   const safeId = JSON.stringify(instanceId);
   const mermaidTheme = theme.isDark ? 'dark' : 'neutral';
@@ -701,6 +707,7 @@ function buildRuntimeBootstrapScript(
   var AUTO_BASE_W = ${Math.round(baseW)};
   var AUTO_BASE_H = ${Math.round(baseH)};
   var IS_SINGLE_REVEAL = ${isSingleReveal ? 'true' : 'false'};
+  var EXPECTS_TAILWIND = ${expectsTailwind ? 'true' : 'false'};
 
   function postHost(type, payload) {
     try {
@@ -744,29 +751,44 @@ function buildRuntimeBootstrapScript(
   }
 
   function hydrateLibraries() {
-    // 1. Lucide icons
+    var pendingPromise = null;
+
+    // 1. Lucide icons (idempotent: only run when un-hydrated [data-lucide] icons exist)
     ${
       libraries.lucide
-        ? `try { if (window.lucide && typeof window.lucide.createIcons === 'function') { window.lucide.createIcons(); } } catch (_) {}`
-        : ''
-    }
-
-    // 2. Highlight.js
-    ${
-      libraries.highlightjs
         ? `try {
-      if (window.hljs && typeof window.hljs.highlightAll === 'function') {
-        window.hljs.highlightAll();
+      if (window.lucide && typeof window.lucide.createIcons === 'function' && document.querySelector('[data-lucide]')) {
+        window.lucide.createIcons();
       }
     } catch (_) {}`
         : ''
     }
 
-    // 3. KaTeX auto-render
+    // 2. Highlight.js (idempotent: skip already-highlighted code blocks)
+    ${
+      libraries.highlightjs
+        ? `try {
+      if (window.hljs) {
+        if (typeof window.hljs.highlightElement === 'function') {
+          var codeBlocks = document.querySelectorAll('pre code:not([data-highlighted="yes"])');
+          for (var ci = 0; ci < codeBlocks.length; ci++) {
+            window.hljs.highlightElement(codeBlocks[ci]);
+          }
+        } else if (typeof window.hljs.highlightAll === 'function' && !window.__slHljsDone) {
+          window.__slHljsDone = true;
+          window.hljs.highlightAll();
+        }
+      }
+    } catch (_) {}`
+        : ''
+    }
+
+    // 3. KaTeX auto-render (idempotent: run once once renderMathInElement is available)
     ${
       libraries.katex
         ? `try {
-      if (typeof window.renderMathInElement === 'function') {
+      if (typeof window.renderMathInElement === 'function' && document.body && !document.body.dataset.slMathDone) {
+        document.body.dataset.slMathDone = '1';
         window.renderMathInElement(document.body, {
           delimiters: [
             { left: '$$', right: '$$', display: true },
@@ -781,18 +803,25 @@ function buildRuntimeBootstrapScript(
         : ''
     }
 
-    // 4. Mermaid diagrams
+    // 4. Mermaid diagrams (idempotent: only process un-rendered .mermaid nodes)
     ${
       libraries.mermaid
         ? `try {
-      if (window.mermaid && document.querySelector('.mermaid')) {
-        window.mermaid.initialize({
-          startOnLoad: false,
-          securityLevel: 'strict',
-          theme: ${JSON.stringify(mermaidTheme)},
-          fontFamily: getComputedStyle(document.documentElement).getPropertyValue('--slide-font-body').trim() || 'sans-serif'
-        });
-        window.mermaid.run({ querySelector: '.mermaid' }).catch(function() {});
+      var mermaidNodes = document.querySelectorAll('.mermaid:not([data-processed="true"])');
+      if (window.mermaid && mermaidNodes.length > 0) {
+        if (!window.__slMermaidInit) {
+          window.__slMermaidInit = true;
+          window.mermaid.initialize({
+            startOnLoad: false,
+            securityLevel: 'strict',
+            theme: ${JSON.stringify(mermaidTheme)},
+            fontFamily: getComputedStyle(document.documentElement).getPropertyValue('--slide-font-body').trim() || 'sans-serif'
+          });
+        }
+        var mermaidRun = window.mermaid.run({ nodes: Array.prototype.slice.call(mermaidNodes) });
+        if (mermaidRun && typeof mermaidRun.then === 'function') {
+          pendingPromise = mermaidRun.catch(function() {});
+        }
       }
     } catch (_) {}`
         : ''
@@ -818,6 +847,8 @@ function buildRuntimeBootstrapScript(
       if (fragments.length > 0) {
         var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
         fragments.forEach(function(el, idx) {
+          if (el.dataset.slFragScheduled) return;
+          el.dataset.slFragScheduled = '1';
           if (IS_THUMBNAIL || EDIT_MODE || reduced) {
             el.classList.add('visible');
           } else {
@@ -849,6 +880,8 @@ function buildRuntimeBootstrapScript(
         }
       }
     } catch (_) {}
+
+    return pendingPromise;
   }
 
   var lastReportedW = AUTO_BASE_W;
@@ -989,24 +1022,206 @@ function buildRuntimeBootstrapScript(
     } catch (_) {}
   }
 
-  function onReady() {
-    setTimeout(hydrateLibraries, 20);
-    if (IS_THUMBNAIL) {
-      setTimeout(freezeThumbnailLoops, 2400);
-    }
+  var readySent = false;
+  var revealStarted = false;
+
+  function releasePaintGate() {
+    try {
+      if (window.__slPaintGateTimer) {
+        clearTimeout(window.__slPaintGateTimer);
+        window.__slPaintGateTimer = null;
+      }
+      document.documentElement.removeAttribute('data-slideino-pending');
+    } catch (_) {}
+  }
+
+  function signalSlideReady() {
+    if (readySent) return;
+    readySent = true;
+    releasePaintGate();
     if (AUTO_SIZE) {
-      scheduleMeasure(40);
-      setTimeout(measureAndReportSize, 220);
-      setTimeout(measureAndReportSize, 650);
+      measureAndReportSize();
+    }
+    var emit = function() {
+      postHost('slide-ready', {
+        width: lastReportedW,
+        height: lastReportedH
+      });
+    };
+    if (typeof window.requestAnimationFrame === 'function') {
+      window.requestAnimationFrame(emit);
+    } else {
+      emit();
+    }
+  }
+
+  function hasTailwindStyleInjected() {
+    try {
+      var styles = document.head ? document.head.querySelectorAll('style') : [];
+      for (var i = 0; i < styles.length; i++) {
+        var el = styles[i];
+        if (
+          el.hasAttribute('data-slideino-theme') ||
+          el.hasAttribute('data-slideino-paint-gate') ||
+          el.hasAttribute('data-slideino-shared') ||
+          el.hasAttribute('data-slideino-tokens') ||
+          el.hasAttribute('data-slideino-overrides') ||
+          el.hasAttribute('data-slideino-editor') ||
+          el.hasAttribute('data-slideino-reveal') ||
+          el.hasAttribute('data-slideino-reveal-single-css')
+        ) {
+          continue;
+        }
+        var txt = el.textContent || '';
+        if (txt.indexOf('tailwindcss') !== -1 || txt.indexOf('--tw-') !== -1) {
+          return true;
+        }
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  function waitForTailwindCss() {
+    if (!EXPECTS_TAILWIND || hasTailwindStyleInjected()) return Promise.resolve();
+    return new Promise(function(resolve) {
+      var start = Date.now();
+      var done = false;
+      var finish = function() {
+        if (done) return;
+        done = true;
+        resolve();
+      };
+      var check = function() {
+        if (done) return;
+        if (hasTailwindStyleInjected() || Date.now() - start >= 1200) {
+          finish();
+          return;
+        }
+        if (typeof window.requestAnimationFrame === 'function') {
+          window.requestAnimationFrame(check);
+        } else {
+          setTimeout(check, 16);
+        }
+      };
+      check();
+    });
+  }
+
+  function waitForImagesDecoded() {
+    try {
+      var imgs = document.images;
+      if (!imgs || imgs.length === 0) return Promise.resolve();
+      var decodes = [];
+      for (var i = 0; i < imgs.length; i++) {
+        var img = imgs[i];
+        if (!img || (!img.currentSrc && !img.getAttribute('src'))) continue;
+        if (typeof img.decode === 'function') {
+          decodes.push(img.decode().catch(function() {}));
+        } else if (!img.complete) {
+          decodes.push(new Promise(function(res) {
+            img.addEventListener('load', res, { once: true });
+            img.addEventListener('error', res, { once: true });
+          }));
+        }
+      }
+      if (decodes.length === 0) return Promise.resolve();
+      return Promise.race([
+        Promise.all(decodes),
+        new Promise(function(resolve) { setTimeout(resolve, 800); })
+      ]);
+    } catch (_) {
+      return Promise.resolve();
+    }
+  }
+
+  function waitForWindowLoad() {
+    if (document.readyState === 'complete') return Promise.resolve();
+    return new Promise(function(resolve) {
+      var done = false;
+      var finish = function() {
+        if (done) return;
+        done = true;
+        resolve();
+      };
+      window.addEventListener('load', finish, { once: true });
+      setTimeout(finish, 3500);
+    });
+  }
+
+  function runFullReadyBarrier(initialHydration) {
+    if (revealStarted || readySent) return;
+    revealStarted = true;
+
+    waitForWindowLoad().then(function() {
+      var loadHydration = hydrateLibraries();
+      var waiters = [];
+
+      if (initialHydration && typeof initialHydration.then === 'function') {
+        waiters.push(
+          Promise.race([
+            initialHydration.catch(function() {}),
+            new Promise(function(resolve) { setTimeout(resolve, 1500); })
+          ])
+        );
+      }
+      if (loadHydration && typeof loadHydration.then === 'function') {
+        waiters.push(
+          Promise.race([
+            loadHydration.catch(function() {}),
+            new Promise(function(resolve) { setTimeout(resolve, 1500); })
+          ])
+        );
+      }
+      if (EXPECTS_TAILWIND) {
+        waiters.push(waitForTailwindCss());
+      }
+      if (document.fonts && document.fonts.ready) {
+        waiters.push(
+          Promise.race([
+            document.fonts.ready.catch(function() {}),
+            new Promise(function(resolve) { setTimeout(resolve, 1200); })
+          ])
+        );
+      }
+      waiters.push(waitForImagesDecoded());
+
+      var settleAndReveal = function() {
+        if (readySent) return;
+        if (typeof window.requestAnimationFrame === 'function') {
+          window.requestAnimationFrame(function() {
+            window.requestAnimationFrame(signalSlideReady);
+          });
+        } else {
+          signalSlideReady();
+        }
+      };
+
+      if (typeof Promise !== 'undefined' && typeof Promise.all === 'function') {
+        Promise.all(waiters).then(settleAndReveal, settleAndReveal);
+      } else {
+        settleAndReveal();
+      }
+    });
+  }
+
+  function onReady() {
+    var pendingHydration = hydrateLibraries();
+    if (AUTO_SIZE) {
       if (document.fonts && document.fonts.ready) {
         document.fonts.ready.then(function() { scheduleMeasure(30); }).catch(function() {});
       }
       if (typeof ResizeObserver === 'function' && document.body) {
         try {
-          var ro = new ResizeObserver(function() { scheduleMeasure(80); });
+          var ro = new ResizeObserver(function() {
+            if (readySent) scheduleMeasure(80);
+          });
           ro.observe(document.body);
         } catch (_) {}
       }
+    }
+    runFullReadyBarrier(pendingHydration);
+    if (IS_THUMBNAIL) {
+      setTimeout(freezeThumbnailLoops, 2400);
     }
   }
 
@@ -1016,8 +1231,10 @@ function buildRuntimeBootstrapScript(
     onReady();
   }
   window.addEventListener('load', function() {
-    hydrateLibraries();
-    scheduleMeasure(50);
+    var pendingHydration = hydrateLibraries();
+    if (!revealStarted) {
+      runFullReadyBarrier(pendingHydration);
+    }
     if (IS_THUMBNAIL) {
       setTimeout(freezeThumbnailLoops, 900);
     }
@@ -1093,6 +1310,11 @@ export function buildSlideDocument(options: BuildSlideOptions): string {
       (/class=["'][^"']*\breveal\b[^"']*["']/i.test(processedHtml) &&
         /class=["'][^"']*\bslides\b[^"']*["']/i.test(processedHtml)));
 
+  const expectsTailwind = Boolean(
+    usedLibraries.tailwind || /<script[^>]+tailwindcss/i.test(processedHtml)
+  );
+  const paintGateTags = buildPaintGateHeadTags();
+
   const runtimeScript = buildRuntimeBootstrapScript(
     instanceId,
     theme,
@@ -1101,7 +1323,8 @@ export function buildSlideDocument(options: BuildSlideOptions): string {
     activeEditMode,
     autoSize,
     autoBaseDims,
-    isSingleReveal
+    isSingleReveal,
+    expectsTailwind
   );
   const visualEditorScript = activeEditMode
     ? buildVisualEditorInjection(instanceId, isFullDocument)
@@ -1113,6 +1336,7 @@ export function buildSlideDocument(options: BuildSlideOptions): string {
       doc = doc.replace(/<html([^>]*)>/i, '<html$1 data-slideino-reveal-single="true">');
     }
     const basePrefix = [
+      paintGateTags,
       isSingleReveal ? buildSingleSlideRevealShimScript() : '',
       `<style data-slideino-tokens="true">${escapeStyleClose(
         buildRootVariablesCss(theme, slide)
@@ -1134,7 +1358,7 @@ export function buildSlideDocument(options: BuildSlideOptions): string {
       .filter(Boolean)
       .join('\n');
 
-    // Inject shim + tokens + shared fonts at the beginning of <head> so the slide's own styles take priority
+    // Inject paint gate + shim + tokens + shared fonts at the beginning of <head> so the slide's own styles take priority
     if (/<head[^>]*>/i.test(doc)) {
       doc = doc.replace(/<head[^>]*>/i, (match) => `${match}\n${basePrefix}`);
     } else if (/<html[^>]*>/i.test(doc)) {
@@ -1174,6 +1398,7 @@ export function buildSlideDocument(options: BuildSlideOptions): string {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  ${paintGateTags}
   ${sharedStyleTag}
   ${autoFontLink}
   ${headTags}
@@ -1187,3 +1412,68 @@ ${visualEditorScript}
 </body>
 </html>`;
 }
+
+const TAILWIND_BG_MAP: Record<string, string> = {
+  black: '#000000',
+  white: '#ffffff',
+  'slate-950': '#020617',
+  'slate-900': '#0f172a',
+  'zinc-950': '#09090b',
+  'zinc-900': '#18181b',
+  'neutral-950': '#0a0a0a',
+  'neutral-900': '#171717',
+  'gray-950': '#030712',
+  'gray-900': '#111827',
+  'stone-950': '#0c0a09',
+  'stone-900': '#1c1917',
+};
+
+/**
+ * Infers the primary background color of a standalone HTML slide so the host
+ * stage backdrop matches the slide immediately before first reveal (zero white flash).
+ */
+export function detectStandaloneBackdrop(html: string, css?: string): string | null {
+  const source = `${css || ''}\n${html || ''}`;
+  if (!source.trim()) return null;
+
+  // 1. Check direct html/body background rule
+  const bodyRule = source.match(
+    /(?:^|[\s},;])(?:html\s*,\s*body|body|html)\s*\{[^}]*?background(?:-color)?\s*:\s*([^;!}]+)/i
+  );
+  if (bodyRule && bodyRule[1]) {
+    const val = bodyRule[1].trim();
+    const directColor = val.match(/^(#[0-9a-fA-F]{3,8}|rgba?\([^)]+\)|hsla?\([^)]+\))/);
+    if (directColor) return directColor[1];
+    // Resolve var(--name) from :root / style block
+    const varRef = val.match(/var\(\s*(--[a-zA-Z0-9_-]+)/);
+    if (varRef) {
+      const escaped = varRef[1].replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+      const defMatch = source.match(
+        new RegExp(`${escaped}\\s*:\\s*(#[0-9a-fA-F]{3,8}|rgba?\\([^)]+\\)|hsla?\\([^)]+\\))`, 'i')
+      );
+      if (defMatch) return defMatch[1];
+    }
+  }
+
+  // 2. Check common :root --bg custom property
+  const rootBg = source.match(
+    /--(?:bg|background|slide-bg|surface-bg)\s*:\s*(#[0-9a-fA-F]{3,8}|rgba?\([^)]+\)|hsla?\([^)]+\))/i
+  );
+  if (rootBg) return rootBg[1];
+
+  // 3. Check Tailwind body background utility class
+  const bodyClass = (html || '').match(/<body[^>]*\bclass\s*=\s*["']([^"']+)["']/i);
+  if (bodyClass) {
+    const arb = bodyClass[1].match(/\bbg-\[(#[0-9a-fA-F]{3,8})\]/);
+    if (arb) return arb[1];
+    const token = bodyClass[1].match(
+      /\bbg-(black|white|(?:slate|zinc|neutral|gray|stone)-(?:900|950))\b/
+    );
+    if (token && TAILWIND_BG_MAP[token[1]]) {
+      return TAILWIND_BG_MAP[token[1]];
+    }
+  }
+
+  return null;
+}
+
