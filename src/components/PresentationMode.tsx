@@ -174,6 +174,11 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
   const currentSlideIdRef = useRef(currentSlide.id);
   currentSlideIdRef.current = currentSlide.id;
   const nextSlide = slides[currentIndex + 1] || null;
+  const prevSlide = slides[currentIndex - 1] || null;
+  const preloadSlides = useMemo(
+    () => [nextSlide, prevSlide].filter((s): s is NonNullable<typeof s> => Boolean(s)),
+    [nextSlide, prevSlide]
+  );
   const currentAnnotations = useMemo(
     () => annotationsBySlide[currentSlide.id] || [],
     [annotationsBySlide, currentSlide.id]
@@ -714,6 +719,7 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
             <div className="relative flex-1 min-h-0 rounded-xl overflow-hidden border border-slate-800 bg-black p-2">
               <SlideFrame
                 slide={currentSlide}
+                preloadSlides={preloadSlides}
                 theme={theme}
                 libraries={deck.libraries}
                 customResources={deck.customResources}
@@ -903,6 +909,7 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({
           ) : (
             <SlideFrame
               slide={currentSlide}
+              preloadSlides={preloadSlides}
               theme={theme}
               libraries={deck.libraries}
               customResources={deck.customResources}

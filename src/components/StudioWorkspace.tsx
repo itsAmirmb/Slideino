@@ -149,6 +149,15 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
   const codeHistoryTimerRef = useRef<number | null>(null);
 
   const activeSlide = deck.slides[activeSlideIndex] || deck.slides[0];
+  const nextStudioSlide = deck.slides[activeSlideIndex + 1] || null;
+  const prevStudioSlide = deck.slides[activeSlideIndex - 1] || null;
+  const studioPreloadSlides = useMemo(
+    () =>
+      (editMode ? [nextStudioSlide] : [nextStudioSlide, prevStudioSlide]).filter(
+        (s): s is Slide => Boolean(s)
+      ),
+    [editMode, nextStudioSlide, prevStudioSlide]
+  );
 
   // Keep a baseline snapshot for the active slide so the first visual edit can always be undone
   useEffect(() => {
@@ -1183,6 +1192,7 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
                   <SlideFrame
                     ref={stageFrameRef}
                     slide={activeSlide}
+                    preloadSlides={studioPreloadSlides}
                     theme={activeTheme}
                     libraries={deck.libraries}
                     customResources={deck.customResources}

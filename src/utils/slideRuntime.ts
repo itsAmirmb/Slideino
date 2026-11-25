@@ -21,6 +21,7 @@ export interface BuildSlideOptions {
   autoSize?: boolean;
   autoBaseDims?: { width: number; height: number };
   prefersReducedMotion?: boolean;
+  preloadPaused?: boolean;
 }
 
 const MIN_AUTO_W = 480;
@@ -677,9 +678,10 @@ html[data-slideino-reveal-single="true"] .reveal > .pause-overlay {
 </style>`;
 }
 
-function buildPaintGateHeadTags(): string {
-  return `<style data-slideino-paint-gate="true">html[data-slideino-pending="true"] body{opacity:0 !important;pointer-events:none !important;}</style>
-<script data-slideino-paint-gate="true">(function(){var r=document.documentElement;r.setAttribute('data-slideino-pending','true');window.__slPaintGateTimer=setTimeout(function(){r.removeAttribute('data-slideino-pending');},4500);})();</script>`;
+function buildPaintGateHeadTags(preloadPaused = false): string {
+  const pauseAttr = preloadPaused ? `r.setAttribute('data-slideino-paused','true');` : '';
+  return `<style data-slideino-paint-gate="true">html[data-slideino-pending="true"] body{opacity:0 !important;pointer-events:none !important;}html[data-slideino-paused="true"] *,html[data-slideino-paused="true"] *::before,html[data-slideino-paused="true"] *::after{animation-play-state:paused !important;}</style>
+<script data-slideino-paint-gate="true">(function(){var r=document.documentElement;r.setAttribute('data-slideino-pending','true');${pauseAttr}window.__slPaintGateTimer=setTimeout(function(){r.removeAttribute('data-slideino-pending');},4500);})();</script>`;
 }
 
 function buildRuntimeBootstrapScript(
@@ -691,7 +693,8 @@ function buildRuntimeBootstrapScript(
   autoSize: boolean,
   autoBaseDims?: { width: number; height: number },
   isSingleReveal = false,
-  expectsTailwind = false
+  expectsTailwind = false,
+  preloadPaused = false
 ): string {
   const safeId = JSON.stringify(instanceId);
   const mermaidTheme = theme.isDark ? 'dark' : 'neutral';
@@ -708,6 +711,85 @@ function buildRuntimeBootstrapScript(
   var AUTO_BASE_H = ${Math.round(baseH)};
   var IS_SINGLE_REVEAL = ${isSingleReveal ? 'true' : 'false'};
   var EXPECTS_TAILWIND = ${expectsTailwind ? 'true' : 'false'};
+  var IS_PRELOAD = ${preloadPaused ? 'true' : 'false'};
+
+  var __slActive = !IS_PRELOAD;
+  var __slRafFrozen = false;
+  var __slQueuedRafs = [];
+  var __slPendingFragments = [];
+  var __slNativeRaf = window.requestAnimationFrame ? window.requestAnimationFrame.bind(window) : null;
+
+  if (!IS_THUMBNAIL && !EDIT_MODE && __slNativeRaf) {
+    window.requestAnimationFrame = function(cb) {
+      if (__slRafFrozen && !__slActive) {
+        __slQueuedRafs.push(cb);
+        return 0;
+      }
+      return __slNativeRaf(cb);
+    };
+  }
+
+  function pauseGsapAtStart() {
+    if (EDIT_MODE || IS_THUMBNAIL) return;
+    try {
+      if (window.gsap && window.gsap.globalTimeline) {
+        window.gsap.globalTimeline.pause(0);
+      }
+    } catch (_) {}
+  }
+
+  function activateSlide() {
+    var wasInactive = !__slActive;
+    __slActive = true;
+    __slRafFrozen = false;
+    try { document.documentElement.removeAttribute('data-slideino-paused'); } catch (_) {}
+    if (__slQueuedRafs.length > 0 && __slNativeRaf) {
+      var batch = __slQueuedRafs.splice(0, __slQueuedRafs.length);
+      for (var qi = 0; qi < batch.length; qi++) {
+        __slNativeRaf(batch[qi]);
+      }
+    }
+    if (wasInactive && !EDIT_MODE && !IS_THUMBNAIL) {
+      try {
+        var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        if (!reduced && window.gsap && window.gsap.globalTimeline) {
+          window.gsap.globalTimeline.play(0);
+        }
+      } catch (_) {}
+      if (__slPendingFragments.length > 0) {
+        var frags = __slPendingFragments.splice(0, __slPendingFragments.length);
+        frags.forEach(function(el, idx) {
+          setTimeout(function() { el.classList.add('visible'); }, 90 + idx * 120);
+        });
+      }
+    }
+  }
+
+  function deactivateSlide() {
+    if (EDIT_MODE || IS_THUMBNAIL) return;
+    __slActive = false;
+    __slRafFrozen = true;
+    try { document.documentElement.setAttribute('data-slideino-paused', 'true'); } catch (_) {}
+    pauseGsapAtStart();
+    try {
+      var media = document.querySelectorAll('video, audio');
+      for (var mi = 0; mi < media.length; mi++) {
+        if (media[mi] && typeof media[mi].pause === 'function') media[mi].pause();
+      }
+    } catch (_) {}
+  }
+
+  window.addEventListener('message', function(e) {
+    var d = e.data;
+    if (!d || typeof d !== 'object' || d.source !== 'slideino-host' || d.instanceId !== INSTANCE_ID) return;
+    var cmd = d.command;
+    if (!cmd || typeof cmd !== 'object') return;
+    if (cmd.type === 'slide-activate') {
+      activateSlide();
+    } else if (cmd.type === 'slide-deactivate') {
+      deactivateSlide();
+    }
+  });
 
   function postHost(type, payload) {
     try {
@@ -851,6 +933,8 @@ function buildRuntimeBootstrapScript(
           el.dataset.slFragScheduled = '1';
           if (IS_THUMBNAIL || EDIT_MODE || reduced) {
             el.classList.add('visible');
+          } else if (!__slActive) {
+            __slPendingFragments.push(el);
           } else {
             setTimeout(function() { el.classList.add('visible'); }, 90 + idx * 120);
           }
@@ -1038,6 +1122,9 @@ function buildRuntimeBootstrapScript(
   function signalSlideReady() {
     if (readySent) return;
     readySent = true;
+    if (!__slActive && !EDIT_MODE && !IS_THUMBNAIL) {
+      pauseGsapAtStart();
+    }
     releasePaintGate();
     if (AUTO_SIZE) {
       measureAndReportSize();
@@ -1047,9 +1134,14 @@ function buildRuntimeBootstrapScript(
         width: lastReportedW,
         height: lastReportedH
       });
+      if (!__slActive && !EDIT_MODE && !IS_THUMBNAIL) {
+        __slRafFrozen = true;
+        try { document.documentElement.setAttribute('data-slideino-paused', 'true'); } catch (_) {}
+        pauseGsapAtStart();
+      }
     };
-    if (typeof window.requestAnimationFrame === 'function') {
-      window.requestAnimationFrame(emit);
+    if (__slNativeRaf) {
+      __slNativeRaf(emit);
     } else {
       emit();
     }
@@ -1093,12 +1185,12 @@ function buildRuntimeBootstrapScript(
       };
       var check = function() {
         if (done) return;
-        if (hasTailwindStyleInjected() || Date.now() - start >= 1200) {
+        if (hasTailwindStyleInjected() || Date.now() - start >= 1000) {
           finish();
           return;
         }
-        if (typeof window.requestAnimationFrame === 'function') {
-          window.requestAnimationFrame(check);
+        if (__slNativeRaf) {
+          __slNativeRaf(check);
         } else {
           setTimeout(check, 16);
         }
@@ -1127,7 +1219,7 @@ function buildRuntimeBootstrapScript(
       if (decodes.length === 0) return Promise.resolve();
       return Promise.race([
         Promise.all(decodes),
-        new Promise(function(resolve) { setTimeout(resolve, 800); })
+        new Promise(function(resolve) { setTimeout(resolve, 600); })
       ]);
     } catch (_) {
       return Promise.resolve();
@@ -1144,7 +1236,7 @@ function buildRuntimeBootstrapScript(
         resolve();
       };
       window.addEventListener('load', finish, { once: true });
-      setTimeout(finish, 3500);
+      setTimeout(finish, 2200);
     });
   }
 
@@ -1152,15 +1244,27 @@ function buildRuntimeBootstrapScript(
     if (revealStarted || readySent) return;
     revealStarted = true;
 
+    // Kick off Tailwind & font readiness checks in parallel with window.load for minimum latency
+    var tailwindPromise = EXPECTS_TAILWIND ? waitForTailwindCss() : Promise.resolve();
+    var fontsPromise = (document.fonts && document.fonts.ready)
+      ? Promise.race([
+          document.fonts.ready.catch(function() {}),
+          new Promise(function(resolve) { setTimeout(resolve, 800); })
+        ])
+      : Promise.resolve();
+
     waitForWindowLoad().then(function() {
       var loadHydration = hydrateLibraries();
-      var waiters = [];
+      if (!__slActive && !EDIT_MODE && !IS_THUMBNAIL) {
+        pauseGsapAtStart();
+      }
+      var waiters = [tailwindPromise, fontsPromise, waitForImagesDecoded()];
 
       if (initialHydration && typeof initialHydration.then === 'function') {
         waiters.push(
           Promise.race([
             initialHydration.catch(function() {}),
-            new Promise(function(resolve) { setTimeout(resolve, 1500); })
+            new Promise(function(resolve) { setTimeout(resolve, 1200); })
           ])
         );
       }
@@ -1168,29 +1272,15 @@ function buildRuntimeBootstrapScript(
         waiters.push(
           Promise.race([
             loadHydration.catch(function() {}),
-            new Promise(function(resolve) { setTimeout(resolve, 1500); })
-          ])
-        );
-      }
-      if (EXPECTS_TAILWIND) {
-        waiters.push(waitForTailwindCss());
-      }
-      if (document.fonts && document.fonts.ready) {
-        waiters.push(
-          Promise.race([
-            document.fonts.ready.catch(function() {}),
             new Promise(function(resolve) { setTimeout(resolve, 1200); })
           ])
         );
       }
-      waiters.push(waitForImagesDecoded());
 
       var settleAndReveal = function() {
         if (readySent) return;
-        if (typeof window.requestAnimationFrame === 'function') {
-          window.requestAnimationFrame(function() {
-            window.requestAnimationFrame(signalSlideReady);
-          });
+        if (__slNativeRaf) {
+          __slNativeRaf(signalSlideReady);
         } else {
           signalSlideReady();
         }
@@ -1206,6 +1296,9 @@ function buildRuntimeBootstrapScript(
 
   function onReady() {
     var pendingHydration = hydrateLibraries();
+    if (!__slActive && !EDIT_MODE && !IS_THUMBNAIL) {
+      pauseGsapAtStart();
+    }
     if (AUTO_SIZE) {
       if (document.fonts && document.fonts.ready) {
         document.fonts.ready.then(function() { scheduleMeasure(30); }).catch(function() {});
@@ -1213,7 +1306,7 @@ function buildRuntimeBootstrapScript(
       if (typeof ResizeObserver === 'function' && document.body) {
         try {
           var ro = new ResizeObserver(function() {
-            if (readySent) scheduleMeasure(80);
+            if (readySent && __slActive) scheduleMeasure(80);
           });
           ro.observe(document.body);
         } catch (_) {}
@@ -1257,6 +1350,7 @@ export function buildSlideDocument(options: BuildSlideOptions): string {
     autoSize = false,
     autoBaseDims,
     prefersReducedMotion = false,
+    preloadPaused = false,
   } = options;
 
   const processedHtml = resolveLocalAssetPaths(
@@ -1313,7 +1407,8 @@ export function buildSlideDocument(options: BuildSlideOptions): string {
   const expectsTailwind = Boolean(
     usedLibraries.tailwind || /<script[^>]+tailwindcss/i.test(processedHtml)
   );
-  const paintGateTags = buildPaintGateHeadTags();
+  const effectivePreloadPaused = Boolean(preloadPaused && !isThumbnail && !activeEditMode);
+  const paintGateTags = buildPaintGateHeadTags(effectivePreloadPaused);
 
   const runtimeScript = buildRuntimeBootstrapScript(
     instanceId,
@@ -1324,7 +1419,8 @@ export function buildSlideDocument(options: BuildSlideOptions): string {
     autoSize,
     autoBaseDims,
     isSingleReveal,
-    expectsTailwind
+    expectsTailwind,
+    effectivePreloadPaused
   );
   const visualEditorScript = activeEditMode
     ? buildVisualEditorInjection(instanceId, isFullDocument)
